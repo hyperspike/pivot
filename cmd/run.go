@@ -89,7 +89,6 @@ var runCmd = &cobra.Command{
 		}
 		if failed {
 			panic("failed to push to remote")
-			return
 		}
 
 		if err := k8s.CreateArgoInit("", user, pass); err != nil {
