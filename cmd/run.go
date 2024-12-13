@@ -139,7 +139,7 @@ func init() {
 	}
 	rootCmd.AddCommand(runCmd)
 	viper.AutomaticEnv()
-	runCmd.Flags().StringP("password", "p", "", "remote password [env PIVOT_PASSWD]")
+	runCmd.Flags().StringP("password", "p", "", "remote password (generated if not set) [env PIVOT_PASSWD]")
 	if err := viper.BindPFlag("PIVOT_PASSWD", runCmd.Flags().Lookup("password")); err != nil {
 		panic(err)
 	}

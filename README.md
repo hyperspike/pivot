@@ -34,7 +34,7 @@ Flags:
   -d, --dry-run            dry run
   -h, --help               help for run
   -n, --namespace string   namespace [env PIVOT_NAMESPACE] (default "pivot")
-  -p, --password string    remote password [env PIVOT_PASSWD]
+  -p, --password string    remote password (generated if not set) [env PIVOT_PASSWD]
   -r, --remote string      remote repository [env PIVOT_REMOTE] (default "git.local.net")
   -u, --user string        remote user [env PIVOT_USER] (default "pivot")
 
