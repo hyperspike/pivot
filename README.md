@@ -48,6 +48,38 @@ It then applies the manifests to the cluster, and pushes the `infra` repository 
 
 Finally it wires up the now cluster local `infra` repository to ArgoCD for continuous deployment.
 
+### GitOps Repository
+
+The `infra` repository is a GitOps repository that contains the manifests for bootstrapping bare Cluster to self-hosted, self-managed, GitOps.
+
+```bash
+$ tree infra/
+infra/
+├── argocd
+│   ├── argocd.yaml
+│   ├── kustomization.yaml
+│   └── namespace.yaml
+├── cert-manager
+│   ├── cert-manager.yaml
+│   └── kustomization.yaml
+├── gitea
+│   ├── gitea.yaml
+│   └── kustomization.yaml
+├── gitea-operator
+│   ├── gitea-operator.yaml
+│   └── kustomization.yaml
+├── init
+│   ├── init.yaml
+│   └── kustomization.yaml
+├── postgres-operator
+│   ├── kustomization.yaml
+│   └── postgres-operator.yaml
+├── README.md
+└── valkey-operator
+    ├── kustomization.yaml
+    └── valkey-operator.yaml
+```
+
 ## Installation
 
 ```bash
