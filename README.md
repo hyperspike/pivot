@@ -1,6 +1,6 @@
 # Pivot
 
-pivot from cluster-bootstraping to GitOps, Self-hosted, and self-managed, with a single command. Using Gitea and ArgoCD.
+pivot from cluster-bootstraping to GitOps, Self-hosted, and self-managed, with a single command. Using [Gitea](https://github.com/hyperspike/gitea-operator) and [ArgoCD](https://argo-cd.readthedocs.io/en/stable/).
 
 ## Usage
 
