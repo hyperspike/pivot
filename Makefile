@@ -8,6 +8,7 @@ else
 endif
 
 SRC = $(shell find . -name "*.go")
+IMAGE ?= pivot
 
 build: pivot
 
@@ -25,3 +26,6 @@ gosec:
 
 lint:
 	$Qgolangci-lint run
+
+container: Dockerfile pivot
+	$Qdocker build -t $(IMAGE) .
