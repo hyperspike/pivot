@@ -5,7 +5,8 @@ import (
 	"fmt"
 	"io"
 	"math/big"
-	"net/url"
+	"net/http"
+	"time"
 
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
@@ -21,7 +22,8 @@ var runCmd = &cobra.Command{
 		if err != nil {
 			panic(err)
 		}
-		k8s, err := spool.NewK8s()
+		dryRun := cmd.Flag("dry-run").Value.String() == "true"
+		k8s, err := spool.NewK8s(dryRun)
 		if err != nil {
 			panic(err)
 		}
@@ -48,20 +50,71 @@ var runCmd = &cobra.Command{
 			}
 		}
 		remote := cmd.Flag("remote").Value.String()
-		url, err := url.Parse(remote)
-		if err != nil {
-			panic(err)
-		}
 		user := cmd.Flag("user").Value.String()
-		if err := k8s.CreateGitea("", user, pass, url.Hostname()); err != nil {
+		if err := k8s.CreateGitea("", user, pass, remote); err != nil {
 			panic(err)
 		}
-		if err := r.AddRemote(remote); err != nil {
+		if err := k8s.WriteGiteaToFile("infra/gitea/gitea.yaml"); err != nil {
 			panic(err)
 		}
-		if err := r.PushBasic(user, pass); err != nil {
+		if err := r.AddExisting("gitea/gitea.yaml"); err != nil {
 			panic(err)
 		}
+		if err := r.GenerateKustomize("default", "gitea"); err != nil {
+			panic(err)
+		}
+
+		for tries := 0; tries < 60; tries++ {
+			_, err := http.Get("https://" + remote + "/api/healthz")
+			if err == nil {
+				break
+			}
+			time.Sleep(3 * time.Second)
+		}
+		repoURL := "https://" + remote + "/infra/infra.git"
+		if err := r.AddRemote(repoURL); err != nil {
+			panic(err)
+		}
+		failed := true
+		if !dryRun {
+			for tries := 0; tries < 60; tries++ {
+				if err := r.PushBasic(user, pass); err != nil {
+					fmt.Printf("[try %d] push failed: %v\n", tries, err)
+				} else {
+					failed = false
+					break
+				}
+				time.Sleep(3 * time.Second)
+			}
+		}
+		if failed {
+			panic("failed to push to remote")
+			return
+		}
+
+		if err := k8s.CreateArgoInit("", user, pass); err != nil {
+			panic(err)
+		}
+		if err := k8s.WriteArgoToFile("infra/init/init.yaml"); err != nil {
+			panic(err)
+		}
+		if err := r.AddExisting("init/init.yaml"); err != nil {
+			panic(err)
+		}
+		if err := r.GenerateKustomize("argocd", "init"); err != nil {
+			panic(err)
+		}
+		if !dryRun {
+			for tries := 0; tries < 60; tries++ {
+				if err := r.PushBasic(user, pass); err != nil {
+					fmt.Printf("[try %d] push failed: %v\n", tries, err)
+				} else {
+					break
+				}
+				time.Sleep(3 * time.Second)
+			}
+		}
+
 	},
 }
 
@@ -90,12 +143,24 @@ func init() {
 	if err := viper.BindPFlag("PIVOT_PASSWD", runCmd.Flags().Lookup("password")); err != nil {
 		panic(err)
 	}
-	runCmd.Flags().StringP("remote", "r", "", "remote repository [env PIVOT_REMOTE]")
+	runCmd.Flags().StringP("remote", "r", "git.local.net", "remote repository [env PIVOT_REMOTE]")
 	if err := viper.BindPFlag("PIVOT_REMOTE", runCmd.Flags().Lookup("remote")); err != nil {
 		panic(err)
 	}
 	runCmd.Flags().StringP("user", "u", "pivot", "remote user [env PIVOT_USER]")
 	if err := viper.BindPFlag("PIVOT_USER", runCmd.Flags().Lookup("user")); err != nil {
+		panic(err)
+	}
+	runCmd.Flags().BoolP("dry-run", "d", false, "dry run")
+	if err := viper.BindPFlag("PIVOT_DRY_RUN", runCmd.Flags().Lookup("dry-run")); err != nil {
+		panic(err)
+	}
+	runCmd.Flags().StringP("namespace", "n", "pivot", "namespace [env PIVOT_NAMESPACE]")
+	if err := viper.BindPFlag("PIVOT_NAMESPACE", runCmd.Flags().Lookup("namespace")); err != nil {
+		panic(err)
+	}
+	runCmd.Flags().StringP("context", "c", "", "context [env PIVOT_CONTEXT]")
+	if err := viper.BindPFlag("PIVOT_CONTEXT", runCmd.Flags().Lookup("context")); err != nil {
 		panic(err)
 	}
 }

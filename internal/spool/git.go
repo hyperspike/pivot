@@ -192,6 +192,20 @@ func (s *Spool) PushBasic(user, pass string) error {
 	})
 }
 
+func (s *Spool) AddExisting(path string) error {
+	w, err := s.Repo.Worktree()
+	if err != nil {
+		return err
+	}
+	if _, err = w.Add(filepath.Clean(path)); err != nil {
+		return err
+	}
+	if err = s.commit("Adding " + path); err != nil {
+		return err
+	}
+	return nil
+}
+
 func (s *Spool) concatFiles(files []string, filePath, separator, msg string) error {
 	w, err := s.Repo.Worktree()
 	if err != nil {
@@ -261,6 +275,7 @@ func (s *Spool) addUrl(url, filePath, msg string) error {
 	if err = os.WriteFile(f, readBody, 0600); err != nil {
 		return err
 	}
+	fmt.Println("Adding", filePath)
 	if _, err = w.Add(filePath); err != nil {
 		return err
 	}
@@ -350,7 +365,11 @@ func dirIncludes(files []os.DirEntry, name string) bool {
 	return false
 }
 
-func (s *Spool) createKustomization(path, msg string) error {
+func (s *Spool) GenerateKustomize(namespace, path string) error {
+	return s.createKustomizationWithNamespace(path, namespace, "adding "+path+" kustomization")
+}
+
+func (s *Spool) createKustomizationWithNamespace(path, namespace, msg string) error {
 	w, err := s.Repo.Worktree()
 	if err != nil {
 		return err
@@ -369,7 +388,7 @@ func (s *Spool) createKustomization(path, msg string) error {
 		return err
 	}
 	defer fhk.Close()
-	if _, err = fhk.Write([]byte("namespace: " + path + "\nresources:\n")); err != nil {
+	if _, err = fhk.Write([]byte("namespace: " + namespace + "\nresources:\n")); err != nil {
 		return err
 	}
 	files, err := os.ReadDir(filepath.Join(s.Path, path))
@@ -404,4 +423,8 @@ func (s *Spool) createKustomization(path, msg string) error {
 		return err
 	}
 	return nil
+}
+
+func (s *Spool) createKustomization(path, msg string) error {
+	return s.createKustomizationWithNamespace(path, path, msg)
 }

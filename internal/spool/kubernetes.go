@@ -26,9 +26,18 @@ import (
 type K8s struct {
 	// Kubernetes client
 	client *dynamic.DynamicClient
+	list   map[string][]*unstructured.Unstructured
+	dryRun bool
 }
 
-func NewK8s() (*K8s, error) {
+func NewK8s(dryRun bool) (*K8s, error) {
+	k := &K8s{}
+	k.list = make(map[string][]*unstructured.Unstructured)
+	if dryRun {
+		k.dryRun = true
+		fmt.Println("Dry run enabled")
+		return k, nil
+	}
 	config, err := getK8sConfig()
 	if err != nil {
 		return nil, fmt.Errorf("failed to get k8s config: %w", err)
@@ -37,8 +46,9 @@ func NewK8s() (*K8s, error) {
 	if err != nil {
 		return nil, fmt.Errorf("failed to create k8s client: %w", err)
 	}
+	k.client = client
 
-	return &K8s{client: client}, nil
+	return k, nil
 }
 
 func (k *K8s) ApplyKustomize(path string) error {
@@ -84,6 +94,10 @@ func (k *K8s) ApplyResource(res *resource.Resource) error {
 		Resource: resource,
 	}
 	kind := obj.GetKind()
+	if k.dryRun {
+		fmt.Printf("Dry run: Creating %v\n", gvr)
+		return nil
+	}
 	fmt.Printf("Creating %v\n", gvr)
 	if kind == "Namespace" || kind == "CustomResourceDefinition" || kind == "ClusterRole" || kind == "ClusterRoleBinding" {
 		_, err := k.client.Resource(gvr).Create(context.TODO(), obj, metav1.CreateOptions{})
@@ -106,8 +120,170 @@ func (k *K8s) ApplyResource(res *resource.Resource) error {
 	return nil
 }
 
+func (k *K8s) CreateArgoInit(path, user, password string) error {
+	repo := &unstructured.Unstructured{
+		Object: map[string]interface{}{
+			"apiVersion": "v1",
+			"kind":       "Secret",
+			"metadata": map[string]interface{}{
+				"name":      "infra-repo",
+				"namespace": "argocd",
+				"annotations": map[string]interface{}{
+					"managed-by": "argocd.argoproj.io",
+				},
+				"labels": map[string]interface{}{
+					"argocd.argoproj.io/secret-type": "repository",
+				},
+			},
+			"type": "Opaque",
+			"data": map[string]interface{}{
+				"insecure": base64.StdEncoding.EncodeToString([]byte("true")),
+				"name":     base64.StdEncoding.EncodeToString([]byte("infra")),
+				"username": base64.StdEncoding.EncodeToString([]byte(user)),
+				"password": base64.StdEncoding.EncodeToString([]byte(password)),
+				"project":  base64.StdEncoding.EncodeToString([]byte("default")),
+				"type":     base64.StdEncoding.EncodeToString([]byte("git")),
+				"url":      base64.StdEncoding.EncodeToString([]byte("https://gitea.default.svc/infra/infra")), // this is the internal url
+			},
+		},
+	}
+
+	gvr := schema.GroupVersionResource{
+		Group:    "",
+		Version:  "v1",
+		Resource: "secrets",
+	}
+	if k.dryRun {
+		fmt.Printf("Dry run: Creating %v\n", gvr)
+	} else {
+		fmt.Printf("Creating %v\n", gvr)
+		_, err := k.client.Resource(gvr).Namespace("argocd").Create(context.TODO(), repo, metav1.CreateOptions{})
+		if err != nil && strings.Contains(err.Error(), "already exists") {
+			fmt.Println("Repo already exists, ignoring")
+		} else if err != nil {
+			return fmt.Errorf("failed to create repo resource: %w", err)
+		}
+	}
+
+	argo := &unstructured.Unstructured{
+		Object: map[string]interface{}{
+			"apiVersion": "argoproj.io/v1alpha1",
+			"kind":       "Application",
+			"metadata": map[string]interface{}{
+				"name":      "init",
+				"namespace": "argocd",
+				"labels": map[string]interface{}{
+					"app.kubernetes.io/managed-by": "argocd.argoproj.io",
+					"app.kubernetes.io/instance":   "init",
+				},
+			},
+			"spec": map[string]interface{}{
+				"destination": map[string]interface{}{
+					"namespace": "argocd",
+					"server":    "https://kubernetes.default.svc",
+				},
+				"project": "default",
+				"source": map[string]interface{}{
+					"path":           "init",
+					"repoURL":        "https://gitea.default.svc/infra/infra",
+					"targetRevision": "HEAD",
+				},
+				"syncPolicy": map[string]interface{}{
+					"automated": map[string]interface{}{},
+				},
+			},
+		},
+	}
+	k.list["argocd"] = []*unstructured.Unstructured{}
+	k.list["argocd"] = append(k.list["argocd"], argo)
+	gvr = schema.GroupVersionResource{
+		Group:    "argoproj.io",
+		Version:  "v1alpha1",
+		Resource: "applications",
+	}
+	if k.dryRun {
+		fmt.Printf("Dry run: Creating %v\n", gvr)
+	} else {
+		fmt.Printf("Creating %v\n", gvr)
+		_, err := k.client.Resource(gvr).Namespace("argocd").Create(context.TODO(), argo, metav1.CreateOptions{})
+		if err != nil && strings.Contains(err.Error(), "already exists") {
+			fmt.Println("Argo already exists, ignoring")
+		} else if err != nil {
+			return fmt.Errorf("failed to create argo resource: %w", err)
+		}
+	}
+
+	apps := &unstructured.Unstructured{
+		Object: map[string]interface{}{
+			"apiVersion": "argoproj.io/v1alpha1",
+			"kind":       "ApplicationSet",
+			"metadata": map[string]interface{}{
+				"name":      "init",
+				"namespace": "argocd",
+			},
+			"spec": map[string]interface{}{
+				"goTemplate":        true,
+				"goTemplateOptions": []string{"missingkey=error"},
+				"generators": []map[string]interface{}{
+					{
+						"list": map[string]interface{}{
+							"elements": []map[string]interface{}{
+								{
+									"path": "init",
+								},
+								{
+									"path": "gitea",
+								},
+								{
+									"path": "argocd",
+								},
+								{
+									"path": "cert-manager",
+								},
+								{
+									"path": "postgres-operator",
+								},
+								{
+									"path": "valkey-operator",
+								},
+								{
+									"path": "gitea-operator",
+								},
+							},
+						},
+					},
+				},
+				"template": map[string]interface{}{
+					"metadata": map[string]interface{}{
+						"name": "{{.path}}",
+						"labels": map[string]interface{}{
+							"app.kubernetes.io/managed-by": "argocd.argoproj.io",
+						},
+					},
+					"spec": map[string]interface{}{
+						"destination": map[string]interface{}{
+							"namespace": "argocd",
+							"server":    "https://kubernetes.default.svc",
+						},
+						"project": "default",
+						"source": map[string]interface{}{
+							"path":           "{{.path}}",
+							"repoURL":        "https://gitea.default.svc/infra/infra",
+							"targetRevision": "HEAD",
+						},
+						"syncPolicy": map[string]interface{}{
+							"automated": map[string]interface{}{},
+						},
+					},
+				},
+			},
+		},
+	}
+	k.list["argocd"] = append(k.list["argocd"], apps)
+	return nil
+}
+
 func (k *K8s) CreateGitea(path, user, password, domain string) error {
-	list := []*unstructured.Unstructured{}
 	gitea := &unstructured.Unstructured{
 		Object: map[string]interface{}{
 			"apiVersion": "hyperspike.io/v1",
@@ -121,23 +297,28 @@ func (k *K8s) CreateGitea(path, user, password, domain string) error {
 				"valkey":     true,
 				"certIssuer": "selfsigned",
 				"ingress": map[string]interface{}{
-					"host": "git.local.net",
+					"host": domain,
 				},
 			},
 		},
 	}
-	list = append(list, gitea)
+	k.list["gitea"] = []*unstructured.Unstructured{}
+	k.list["gitea"] = append(k.list["gitea"], gitea)
 	gvr := schema.GroupVersionResource{
 		Group:    "hyperspike.io",
 		Version:  "v1",
 		Resource: "gitea",
 	}
-	fmt.Printf("Creating %v\n", gvr)
-	_, err := k.client.Resource(gvr).Namespace("default").Create(context.TODO(), gitea, metav1.CreateOptions{})
-	if err != nil && strings.Contains(err.Error(), "already exists") {
-		fmt.Println("Gitea already exists, ignoring")
-	} else if err != nil {
-		return fmt.Errorf("failed to create gitea resource: %w", err)
+	if k.dryRun {
+		fmt.Printf("Dry run: Creating %v\n", gvr)
+	} else {
+		fmt.Printf("Creating %v\n", gvr)
+		_, err := k.client.Resource(gvr).Namespace("default").Create(context.TODO(), gitea, metav1.CreateOptions{})
+		if err != nil && strings.Contains(err.Error(), "already exists") {
+			fmt.Println("Gitea already exists, ignoring")
+		} else if err != nil {
+			return fmt.Errorf("failed to create gitea resource: %w", err)
+		}
 	}
 
 	base64pass := base64.StdEncoding.EncodeToString([]byte(password))
@@ -161,12 +342,16 @@ func (k *K8s) CreateGitea(path, user, password, domain string) error {
 		Version:  "v1",
 		Resource: "secrets",
 	}
-	fmt.Printf("Creating %v\n", gvr)
-	_, err = k.client.Resource(gvr).Namespace("default").Create(context.TODO(), passwordSecret, metav1.CreateOptions{})
-	if err != nil && strings.Contains(err.Error(), "already exists") {
-		fmt.Println("Password already exists, ignoring")
-	} else if err != nil {
-		return fmt.Errorf("failed to create password resource: %w", err)
+	if k.dryRun {
+		fmt.Printf("Dry run: Creating %v\n", gvr)
+	} else {
+		fmt.Printf("Creating %v\n", gvr)
+		_, err := k.client.Resource(gvr).Namespace("default").Create(context.TODO(), passwordSecret, metav1.CreateOptions{})
+		if err != nil && strings.Contains(err.Error(), "already exists") {
+			fmt.Println("Password already exists, ignoring")
+		} else if err != nil {
+			return fmt.Errorf("failed to create password resource: %w", err)
+		}
 	}
 
 	giteaUser := &unstructured.Unstructured{
@@ -189,18 +374,22 @@ func (k *K8s) CreateGitea(path, user, password, domain string) error {
 			},
 		},
 	}
-	list = append(list, giteaUser)
+	k.list["gitea"] = append(k.list["gitea"], giteaUser)
 	gvr = schema.GroupVersionResource{
 		Group:    "hyperspike.io",
 		Version:  "v1",
 		Resource: "users",
 	}
-	fmt.Printf("Creating %v\n", gvr)
-	_, err = k.client.Resource(gvr).Namespace("default").Create(context.TODO(), giteaUser, metav1.CreateOptions{})
-	if err != nil && strings.Contains(err.Error(), "already exists") {
-		fmt.Println("User already exists, ignoring")
-	} else if err != nil {
-		return fmt.Errorf("failed to create user resource: %w", err)
+	if k.dryRun {
+		fmt.Printf("Dry run: Creating %v\n", gvr)
+	} else {
+		fmt.Printf("Creating %v\n", gvr)
+		_, err := k.client.Resource(gvr).Namespace("default").Create(context.TODO(), giteaUser, metav1.CreateOptions{})
+		if err != nil && strings.Contains(err.Error(), "already exists") {
+			fmt.Println("User already exists, ignoring")
+		} else if err != nil {
+			return fmt.Errorf("failed to create user resource: %w", err)
+		}
 	}
 
 	org := &unstructured.Unstructured{
@@ -228,31 +417,88 @@ func (k *K8s) CreateGitea(path, user, password, domain string) error {
 			},
 		},
 	}
-	list = append(list, org)
+	k.list["gitea"] = append(k.list["gitea"], org)
 	gvr = schema.GroupVersionResource{
 		Group:    "hyperspike.io",
 		Version:  "v1",
 		Resource: "orgs",
 	}
-	fmt.Printf("Creating %v\n", gvr)
-	_, err = k.client.Resource(gvr).Namespace("default").Create(context.TODO(), org, metav1.CreateOptions{})
-	if err != nil && strings.Contains(err.Error(), "already exists") {
-		fmt.Println("Org already exists, ignoring")
-
-	} else if err != nil {
-		return fmt.Errorf("failed to create org resource: %w", err)
+	if k.dryRun {
+		fmt.Printf("Dry run: Creating %v\n", gvr)
+	} else {
+		fmt.Printf("Creating %v\n", gvr)
+		_, err := k.client.Resource(gvr).Namespace("default").Create(context.TODO(), org, metav1.CreateOptions{})
+		if err != nil && strings.Contains(err.Error(), "already exists") {
+			fmt.Println("Org already exists, ignoring")
+		} else if err != nil {
+			return fmt.Errorf("failed to create org resource: %w", err)
+		}
 	}
-	writeToFile(filepath.Join("infra", "gitea", "gitea.yaml"), list)
+
+	repo := &unstructured.Unstructured{
+		Object: map[string]interface{}{
+			"apiVersion": "hyperspike.io/v1",
+			"kind":       "Repo",
+			"metadata": map[string]interface{}{
+				"name":      "infra",
+				"namespace": "default",
+			},
+			"spec": map[string]interface{}{
+				"org": map[string]interface{}{
+					"name": "infra",
+				},
+				"private": true,
+			},
+		},
+	}
+	k.list["gitea"] = append(k.list["gitea"], repo)
+	gvr = schema.GroupVersionResource{
+		Group:    "hyperspike.io",
+		Version:  "v1",
+		Resource: "repoes",
+	}
+	if k.dryRun {
+		fmt.Printf("Dry run: Creating %v\n", gvr)
+	} else {
+		fmt.Printf("Creating %v\n", gvr)
+		_, err := k.client.Resource(gvr).Namespace("default").Create(context.TODO(), repo, metav1.CreateOptions{})
+		if err != nil && strings.Contains(err.Error(), "already exists") {
+			fmt.Println("Repo already exists, ignoring")
+		} else if err != nil {
+			return fmt.Errorf("failed to create repo resource: %w", err)
+		}
+	}
 	return nil
 }
 
-func writeToFile(path string, list []*unstructured.Unstructured) error {
+func (k *K8s) WriteGiteaToFile(path string) error {
+	if len(k.list["gitea"]) == 0 {
+		return fmt.Errorf("no objects to write, you may need to run CreateGitea first")
+	}
+	return k.writeToFile("gitea", path)
+}
+func (k *K8s) WriteArgoToFile(path string) error {
+	if len(k.list["argocd"]) == 0 {
+		return fmt.Errorf("no objects to write, you may need to run CreateArgoInit first")
+	}
+	return k.writeToFile("argocd", path)
+}
+
+func (k *K8s) writeToFile(list, path string) error {
+	if strings.Count(path, "/") > 1 {
+		if err := os.MkdirAll(filepath.Dir(path), 0750); err != nil {
+			return fmt.Errorf("failed to create directory: %w", err)
+		}
+	}
 	f, err := os.OpenFile(filepath.Clean(path), os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0600)
 	if err != nil {
 		return fmt.Errorf("failed to create file: %w", err)
 	}
 	defer f.Close()
-	for _, obj := range list {
+	if len(k.list[list]) == 0 {
+		return fmt.Errorf("no objects to write, you may need to run CreateGitea first")
+	}
+	for _, obj := range k.list[list] {
 		y, err := goyaml.Marshal(obj.Object)
 		if err != nil {
 			return fmt.Errorf("failed to marshal object: %w", err)
