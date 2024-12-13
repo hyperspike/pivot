@@ -30,10 +30,10 @@ Usage:
   pivot run [flags]
 
 Flags:
-  -c, --context string     context [env PIVOT_CONTEXT]
+  -c, --context string     use an explicit Kubernetes context [env PIVOT_CONTEXT]
   -d, --dry-run            dry run
   -h, --help               help for run
-  -n, --namespace string   namespace [env PIVOT_NAMESPACE] (default "pivot")
+  -n, --namespace string   namespace (context default if not set) [env PIVOT_NAMESPACE]
   -p, --password string    remote password (generated if not set) [env PIVOT_PASSWD]
   -r, --remote string      remote repository [env PIVOT_REMOTE] (default "git.local.net")
   -u, --user string        remote user [env PIVOT_USER] (default "pivot")

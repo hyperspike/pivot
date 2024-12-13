@@ -155,11 +155,11 @@ func init() {
 	if err := viper.BindPFlag("PIVOT_DRY_RUN", runCmd.Flags().Lookup("dry-run")); err != nil {
 		panic(err)
 	}
-	runCmd.Flags().StringP("namespace", "n", "pivot", "namespace [env PIVOT_NAMESPACE]")
+	runCmd.Flags().StringP("namespace", "n", "", "namespace (context default if not set) [env PIVOT_NAMESPACE]")
 	if err := viper.BindPFlag("PIVOT_NAMESPACE", runCmd.Flags().Lookup("namespace")); err != nil {
 		panic(err)
 	}
-	runCmd.Flags().StringP("context", "c", "", "context [env PIVOT_CONTEXT]")
+	runCmd.Flags().StringP("context", "c", "", "use an explicit Kubernetes context [env PIVOT_CONTEXT]")
 	if err := viper.BindPFlag("PIVOT_CONTEXT", runCmd.Flags().Lookup("context")); err != nil {
 		panic(err)
 	}
