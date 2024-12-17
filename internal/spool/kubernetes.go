@@ -176,6 +176,9 @@ func (k *K8s) CreateArgoInit(path, user, password string) error {
 					"app.kubernetes.io/managed-by": "argocd.argoproj.io",
 					"app.kubernetes.io/instance":   "init",
 				},
+				"annotations": map[string]interface{}{
+					"argocd.argoproj.io/manifest-generate-paths": ".", // this is the path to the kustomization.yaml
+				},
 			},
 			"spec": map[string]interface{}{
 				"destination": map[string]interface{}{
@@ -258,6 +261,9 @@ func (k *K8s) CreateArgoInit(path, user, password string) error {
 						"name": "{{.path}}",
 						"labels": map[string]interface{}{
 							"app.kubernetes.io/managed-by": "argocd.argoproj.io",
+						},
+						"annotations": map[string]interface{}{
+							"argocd.argoproj.io/manifest-generate-paths": ".", // this is the path to the kustomization.yaml
 						},
 					},
 					"spec": map[string]interface{}{
