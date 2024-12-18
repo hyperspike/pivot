@@ -29,3 +29,7 @@ lint:
 
 container: Dockerfile pivot
 	$Qdocker build -t $(IMAGE) .
+
+.PHONY: test
+test:
+	$Qgo test $(VV) ./...

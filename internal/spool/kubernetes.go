@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"golang.org/x/exp/maps"
 	goyaml "gopkg.in/yaml.v2"
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -17,6 +18,7 @@ import (
 	"k8s.io/client-go/dynamic"
 	"k8s.io/client-go/rest"
 	"k8s.io/client-go/tools/clientcmd"
+	clientcmdapi "k8s.io/client-go/tools/clientcmd/api"
 
 	"sigs.k8s.io/kustomize/api/krusty"
 	"sigs.k8s.io/kustomize/api/resource"
@@ -28,17 +30,22 @@ type K8s struct {
 	client *dynamic.DynamicClient
 	list   map[string][]*unstructured.Unstructured
 	dryRun bool
+	ctx    context.Context
 }
 
-func NewK8s(dryRun bool) (*K8s, error) {
-	k := &K8s{}
+func NewK8s(ctx context.Context, kubeContext string, dryRun bool) (*K8s, error) {
+	KubeContext = kubeContext
+	if ctx == nil {
+		ctx = context.TODO()
+	}
+	k := &K8s{ctx: ctx}
 	k.list = make(map[string][]*unstructured.Unstructured)
 	if dryRun {
 		k.dryRun = true
 		fmt.Println("Dry run enabled")
 		return k, nil
 	}
-	config, err := getK8sConfig()
+	config, err := GetKubeConfig()
 	if err != nil {
 		return nil, fmt.Errorf("failed to get k8s config: %w", err)
 	}
@@ -100,7 +107,7 @@ func (k *K8s) ApplyResource(res *resource.Resource) error {
 	}
 	fmt.Printf("Creating %v\n", gvr)
 	if kind == "Namespace" || kind == "CustomResourceDefinition" || kind == "ClusterRole" || kind == "ClusterRoleBinding" {
-		_, err := k.client.Resource(gvr).Create(context.TODO(), obj, metav1.CreateOptions{})
+		_, err := k.client.Resource(gvr).Create(k.ctx, obj, metav1.CreateOptions{})
 		// ignore error if already exists
 		if err != nil && strings.Contains(err.Error(), "already exists") {
 			return nil
@@ -109,7 +116,7 @@ func (k *K8s) ApplyResource(res *resource.Resource) error {
 		}
 		return nil
 	}
-	_, err = k.client.Resource(gvr).Namespace(namespace).Create(context.TODO(), obj, metav1.CreateOptions{})
+	_, err = k.client.Resource(gvr).Namespace(namespace).Create(k.ctx, obj, metav1.CreateOptions{})
 	if err != nil && strings.Contains(err.Error(), "already exists") {
 		return nil
 	} else if err != nil {
@@ -157,7 +164,7 @@ func (k *K8s) CreateArgoInit(path, user, password string) error {
 		fmt.Printf("Dry run: Creating %v\n", gvr)
 	} else {
 		fmt.Printf("Creating %v\n", gvr)
-		_, err := k.client.Resource(gvr).Namespace("argocd").Create(context.TODO(), repo, metav1.CreateOptions{})
+		_, err := k.client.Resource(gvr).Namespace("argocd").Create(k.ctx, repo, metav1.CreateOptions{})
 		if err != nil && strings.Contains(err.Error(), "already exists") {
 			fmt.Println("Repo already exists, ignoring")
 		} else if err != nil {
@@ -208,7 +215,7 @@ func (k *K8s) CreateArgoInit(path, user, password string) error {
 		fmt.Printf("Dry run: Creating %v\n", gvr)
 	} else {
 		fmt.Printf("Creating %v\n", gvr)
-		_, err := k.client.Resource(gvr).Namespace("argocd").Create(context.TODO(), argo, metav1.CreateOptions{})
+		_, err := k.client.Resource(gvr).Namespace("argocd").Create(k.ctx, argo, metav1.CreateOptions{})
 		if err != nil && strings.Contains(err.Error(), "already exists") {
 			fmt.Println("Argo already exists, ignoring")
 		} else if err != nil {
@@ -261,6 +268,7 @@ func (k *K8s) CreateArgoInit(path, user, password string) error {
 						"name": "{{.path}}",
 						"labels": map[string]interface{}{
 							"app.kubernetes.io/managed-by": "argocd.argoproj.io",
+							"app.kubernetes.io/instance":   "{{.path}}",
 						},
 						"annotations": map[string]interface{}{
 							"argocd.argoproj.io/manifest-generate-paths": ".", // this is the path to the kustomization.yaml
@@ -319,7 +327,7 @@ func (k *K8s) CreateGitea(path, user, password, domain string) error {
 		fmt.Printf("Dry run: Creating %v\n", gvr)
 	} else {
 		fmt.Printf("Creating %v\n", gvr)
-		_, err := k.client.Resource(gvr).Namespace("default").Create(context.TODO(), gitea, metav1.CreateOptions{})
+		_, err := k.client.Resource(gvr).Namespace("default").Create(k.ctx, gitea, metav1.CreateOptions{})
 		if err != nil && strings.Contains(err.Error(), "already exists") {
 			fmt.Println("Gitea already exists, ignoring")
 		} else if err != nil {
@@ -352,7 +360,7 @@ func (k *K8s) CreateGitea(path, user, password, domain string) error {
 		fmt.Printf("Dry run: Creating %v\n", gvr)
 	} else {
 		fmt.Printf("Creating %v\n", gvr)
-		_, err := k.client.Resource(gvr).Namespace("default").Create(context.TODO(), passwordSecret, metav1.CreateOptions{})
+		_, err := k.client.Resource(gvr).Namespace("default").Create(k.ctx, passwordSecret, metav1.CreateOptions{})
 		if err != nil && strings.Contains(err.Error(), "already exists") {
 			fmt.Println("Password already exists, ignoring")
 		} else if err != nil {
@@ -390,7 +398,7 @@ func (k *K8s) CreateGitea(path, user, password, domain string) error {
 		fmt.Printf("Dry run: Creating %v\n", gvr)
 	} else {
 		fmt.Printf("Creating %v\n", gvr)
-		_, err := k.client.Resource(gvr).Namespace("default").Create(context.TODO(), giteaUser, metav1.CreateOptions{})
+		_, err := k.client.Resource(gvr).Namespace("default").Create(k.ctx, giteaUser, metav1.CreateOptions{})
 		if err != nil && strings.Contains(err.Error(), "already exists") {
 			fmt.Println("User already exists, ignoring")
 		} else if err != nil {
@@ -433,7 +441,7 @@ func (k *K8s) CreateGitea(path, user, password, domain string) error {
 		fmt.Printf("Dry run: Creating %v\n", gvr)
 	} else {
 		fmt.Printf("Creating %v\n", gvr)
-		_, err := k.client.Resource(gvr).Namespace("default").Create(context.TODO(), org, metav1.CreateOptions{})
+		_, err := k.client.Resource(gvr).Namespace("default").Create(k.ctx, org, metav1.CreateOptions{})
 		if err != nil && strings.Contains(err.Error(), "already exists") {
 			fmt.Println("Org already exists, ignoring")
 		} else if err != nil {
@@ -467,7 +475,7 @@ func (k *K8s) CreateGitea(path, user, password, domain string) error {
 		fmt.Printf("Dry run: Creating %v\n", gvr)
 	} else {
 		fmt.Printf("Creating %v\n", gvr)
-		_, err := k.client.Resource(gvr).Namespace("default").Create(context.TODO(), repo, metav1.CreateOptions{})
+		_, err := k.client.Resource(gvr).Namespace("default").Create(k.ctx, repo, metav1.CreateOptions{})
 		if err != nil && strings.Contains(err.Error(), "already exists") {
 			fmt.Println("Repo already exists, ignoring")
 		} else if err != nil {
@@ -519,10 +527,36 @@ func (k *K8s) writeToFile(list, path string) error {
 	return nil
 }
 
-func getK8sConfig() (*rest.Config, error) {
+var KubeContext string = ""
+
+func includes(list []string, item string) bool {
+	for _, i := range list {
+		if i == item {
+			return true
+		}
+	}
+	return false
+}
+
+func fetchKubeConfig() (*clientcmdapi.Config, error) {
 	kubeconfig := os.Getenv("KUBECONFIG")
 	if kubeconfig == "" {
 		kubeconfig = filepath.Join(os.Getenv("HOME"), ".kube", "config")
 	}
-	return clientcmd.BuildConfigFromFlags("", kubeconfig)
+	cfg, err := clientcmd.LoadFromFile(kubeconfig)
+	if err != nil {
+		return nil, fmt.Errorf("failed to load kubeconfig: %w", err)
+	}
+	if KubeContext != "" {
+		if includes(maps.Keys(cfg.Contexts), KubeContext) {
+			cfg.CurrentContext = KubeContext
+		} else {
+			return nil, fmt.Errorf("context %s not found in kubeconfig", KubeContext)
+		}
+	}
+	return cfg, nil
+}
+
+func GetKubeConfig() (*rest.Config, error) {
+	return clientcmd.BuildConfigFromKubeconfigGetter("", fetchKubeConfig)
 }
