@@ -27,12 +27,20 @@ var proxyCmd = &cobra.Command{
 func init() {
 	viper.AutomaticEnv()
 	proxyCmd.Flags().String("context", "", "kubernetes context, defaults to current context")
-	viper.BindPFlag("PIVOT_CONTEXT", proxyCmd.Flags().Lookup("context"))
+	if err := viper.BindPFlag("PIVOT_CONTEXT", proxyCmd.Flags().Lookup("context")); err != nil {
+		panic(err)
+	}
 	proxyCmd.Flags().String("name", "", "name of the pod to proxy")
-	viper.BindPFlag("POD_NAME", proxyCmd.Flags().Lookup("name"))
+	if err := viper.BindPFlag("POD_NAME", proxyCmd.Flags().Lookup("name")); err != nil {
+		panic(err)
+	}
 	proxyCmd.Flags().String("namespace", "", "namespace of the pod to proxy")
-	viper.BindPFlag("POD_NAMESPACE", proxyCmd.Flags().Lookup("namespace"))
+	if err := viper.BindPFlag("POD_NAMESPACE", proxyCmd.Flags().Lookup("namespace")); err != nil {
+		panic(err)
+	}
 	proxyCmd.Flags().String("port", "", "port to forward")
-	viper.BindPFlag("POD_PORT", proxyCmd.Flags().Lookup("port"))
+	if err := viper.BindPFlag("POD_PORT", proxyCmd.Flags().Lookup("port")); err != nil {
+		panic(err)
+	}
 	rootCmd.AddCommand(proxyCmd)
 }
