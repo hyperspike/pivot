@@ -45,6 +45,7 @@ func NewK8s(ctx context.Context, kubeContext string, dryRun bool) (*K8s, error) 
 		fmt.Println("Dry run enabled")
 		return k, nil
 	}
+
 	config, err := GetKubeConfig()
 	if err != nil {
 		return nil, fmt.Errorf("failed to get k8s config: %w", err)

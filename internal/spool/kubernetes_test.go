@@ -7,6 +7,7 @@ import (
 
 func TestKubeContext(t *testing.T) {
 	KubeContext = "does-not-exist"
+
 	_, err := GetKubeConfig()
 	if err == nil {
 		t.Errorf("Expected error when kube context does not exist")
@@ -55,11 +56,13 @@ users:
 		t.Errorf("Error writing to kubeconfig file %v", err)
 	}
 	KubeContext = "default"
+
 	_, err = GetKubeConfig()
 	if err != nil {
 		t.Errorf("Error getting [default] kubeconfig %v", err)
 	}
 	KubeContext = "minikube"
+
 	cfg, err := GetKubeConfig()
 	if err != nil {
 		t.Errorf("Error getting [minikube] kubeconfig %v", err)
