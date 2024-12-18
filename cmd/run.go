@@ -12,6 +12,7 @@ import (
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
 
+	"hyperspike.io/pivot/internal/proxy"
 	"hyperspike.io/pivot/internal/spool"
 )
 
@@ -66,21 +67,34 @@ var runCmd = &cobra.Command{
 			panic(err)
 		}
 
-		for tries := 0; tries < 60; tries++ {
-			_, err := http.Get("https://" + remote + "/api/healthz")
-			if err == nil {
-				break
-			}
-			time.Sleep(3 * time.Second)
-		}
-		repoURL := "https://" + remote + "/infra/infra.git"
-		if err := r.AddRemote(repoURL); err != nil {
+		repoURL := "https://localhost:3000/infra/infra.git"
+		if err := r.AddRemote("local", repoURL); err != nil {
 			panic(err)
 		}
-		failed := true
+		repoURL = "https://" + remote + "/infra/infra.git"
+		if err := r.AddRemote("origin", repoURL); err != nil {
+			panic(err)
+		}
 		if !dryRun {
+			failed := true
+			go func() {
+				forwarder, err := proxy.NewForwarder(ctx, cmd.Flag("context").Value.String())
+				if err != nil {
+					panic(err)
+				}
+				if err := forwarder.ForwardPorts("", "", ""); err != nil {
+					panic(err)
+				}
+			}()
 			for tries := 0; tries < 60; tries++ {
-				if err := r.PushBasic(user, pass); err != nil {
+				_, err := http.Get("https://localhost:3000/api/healthz")
+				if err == nil {
+					break
+				}
+				time.Sleep(3 * time.Second)
+			}
+			for tries := 0; tries < 60; tries++ {
+				if err := r.PushBasic("local", user, pass); err != nil {
 					fmt.Printf("[try %d] push failed: %v\n", tries, err)
 				} else {
 					failed = false
@@ -88,9 +102,9 @@ var runCmd = &cobra.Command{
 				}
 				time.Sleep(3 * time.Second)
 			}
-		}
-		if failed {
-			panic("failed to push to remote")
+			if failed {
+				panic("failed to push to remote")
+			}
 		}
 
 		if err := k8s.CreateArgoInit("", user, pass); err != nil {
@@ -107,7 +121,7 @@ var runCmd = &cobra.Command{
 		}
 		if !dryRun {
 			for tries := 0; tries < 60; tries++ {
-				if err := r.PushBasic(user, pass); err != nil {
+				if err := r.PushBasic("local", user, pass); err != nil {
 					fmt.Printf("[try %d] push failed: %v\n", tries, err)
 				} else {
 					break

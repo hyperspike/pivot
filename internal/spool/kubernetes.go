@@ -45,7 +45,8 @@ func NewK8s(ctx context.Context, kubeContext string, dryRun bool) (*K8s, error) 
 		fmt.Println("Dry run enabled")
 		return k, nil
 	}
-	config, err := getKubeConfig()
+
+	config, err := GetKubeConfig()
 	if err != nil {
 		return nil, fmt.Errorf("failed to get k8s config: %w", err)
 	}
@@ -268,6 +269,7 @@ func (k *K8s) CreateArgoInit(path, user, password string) error {
 						"name": "{{.path}}",
 						"labels": map[string]interface{}{
 							"app.kubernetes.io/managed-by": "argocd.argoproj.io",
+							"app.kubernetes.io/instance":   "{{.path}}",
 						},
 						"annotations": map[string]interface{}{
 							"argocd.argoproj.io/manifest-generate-paths": ".", // this is the path to the kustomization.yaml
@@ -556,6 +558,6 @@ func fetchKubeConfig() (*clientcmdapi.Config, error) {
 	return cfg, nil
 }
 
-func getKubeConfig() (*rest.Config, error) {
+func GetKubeConfig() (*rest.Config, error) {
 	return clientcmd.BuildConfigFromKubeconfigGetter("", fetchKubeConfig)
 }

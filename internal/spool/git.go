@@ -177,22 +177,25 @@ func (s *Spool) commit(msg string) error {
 	return nil
 }
 
-func (s *Spool) AddRemote(remote string) error {
+func (s *Spool) AddRemote(name, remote string) error {
+	if name == "" {
+		name = "origin"
+	}
 	_, err := s.Repo.CreateRemote(&config.RemoteConfig{
-		Name: "origin",
+		Name: name,
 		URLs: []string{remote},
 	})
 	s.Remote = remote
 	return err
 }
 
-func (s *Spool) PushBasic(user, pass string) error {
+func (s *Spool) PushBasic(remote, user, pass string) error {
 	auth := &githttp.BasicAuth{
 		Username: user,
 		Password: pass,
 	}
 	return s.Repo.Push(&git.PushOptions{
-		RemoteName:      "origin",
+		RemoteName:      remote,
 		InsecureSkipTLS: true,
 		Auth:            auth,
 	})
