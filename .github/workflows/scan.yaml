@@ -29,6 +29,10 @@ jobs:
       uses: securego/gosec@master
       with:
         # we let the report trigger content trigger a failure using the GitHub Security features.
+        args: './...'
+    - name: Security Scan with SARIF output
+      uses: securego/gosec@master
+      with:
         args: '-fmt sarif -out results.sarif ./...'
     - name: Upload SARIF file
       if: always()

@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"crypto/rand"
 	"fmt"
 	"io"
@@ -18,12 +19,13 @@ var runCmd = &cobra.Command{
 	Use:   "run",
 	Short: "start pivoting",
 	Run: func(cmd *cobra.Command, args []string) {
-		r, err := spool.CreateRepo("infra")
+		ctx := context.TODO()
+		r, err := spool.CreateRepo(ctx, "infra")
 		if err != nil {
 			panic(err)
 		}
 		dryRun := cmd.Flag("dry-run").Value.String() == "true"
-		k8s, err := spool.NewK8s(dryRun)
+		k8s, err := spool.NewK8s(ctx, cmd.Flag("context").Value.String(), dryRun)
 		if err != nil {
 			panic(err)
 		}
