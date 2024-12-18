@@ -1,6 +1,6 @@
 module hyperspike.io/pivot
 
-go 1.23.4
+go 1.23.0
 
 require (
 	github.com/go-git/go-git/v5 v5.12.0

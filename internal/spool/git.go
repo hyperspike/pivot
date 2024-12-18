@@ -1,6 +1,7 @@
 package spool
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -21,6 +22,7 @@ type Spool struct {
 	Repo   *git.Repository
 	Path   string
 	Remote string
+	ctx    context.Context
 }
 
 var (
@@ -38,7 +40,10 @@ func RepoExists(path string) bool {
 }
 
 // Create a new git repository and adds the initial GitOps tooling
-func CreateRepo(path string) (*Spool, error) {
+func CreateRepo(ctx context.Context, path string) (*Spool, error) {
+	if ctx == nil {
+		ctx = context.TODO()
+	}
 	repo, err := git.PlainInitWithOptions(path, &git.PlainInitOptions{
 		Bare: false,
 		InitOptions: git.InitOptions{
@@ -51,6 +56,7 @@ func CreateRepo(path string) (*Spool, error) {
 	s := &Spool{
 		Path: path,
 		Repo: repo,
+		ctx:  ctx,
 	}
 	if err = s.readme(); err != nil {
 		return nil, err
@@ -221,10 +227,17 @@ func (s *Spool) concatFiles(files []string, filePath, separator, msg string) err
 		return fmt.Errorf("invalid file path %s", f)
 	}
 	fh, err := os.OpenFile(filepath.Clean(f), os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0600)
+	defer func() {
+		if err := fh.Close(); err != nil {
+			fmt.Println(err)
+		}
+	}()
 	if err != nil {
+		if err := fh.Sync(); err != nil {
+			fmt.Println(err)
+		}
 		return err
 	}
-	defer fh.Close()
 	for _, file := range files {
 		readBody, err := os.ReadFile(filepath.Clean(file))
 		if err != nil {
@@ -241,6 +254,9 @@ func (s *Spool) concatFiles(files []string, filePath, separator, msg string) err
 		return err
 	}
 	if err = s.commit(msg); err != nil {
+		return err
+	}
+	if err := fh.Sync(); err != nil {
 		return err
 	}
 	return nil
