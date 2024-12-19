@@ -298,6 +298,26 @@ func (k *K8s) CreateArgoInit(path, user, password string) error {
 	return nil
 }
 
+func (k *K8s) GetPivotPassword() (string, error) {
+	secret, err := k.client.Resource(schema.GroupVersionResource{
+		Group:    "",
+		Version:  "v1",
+		Resource: "secrets",
+	}).Namespace("default").Get(k.ctx, "pivot-password", metav1.GetOptions{})
+	if err != nil {
+		return "", fmt.Errorf("failed to get secret: %w", err)
+	}
+	pass, _, err := unstructured.NestedString(secret.Object, "data", "password")
+	if err != nil {
+		return "", fmt.Errorf("failed to get password: %w", err)
+	}
+	passb64, err := base64.StdEncoding.DecodeString(pass)
+	if err != nil {
+		return "", fmt.Errorf("failed to decode password: %w", err)
+	}
+	return string(passb64), nil
+}
+
 func (k *K8s) CreateGitea(path, user, password, domain string) error {
 	gitea := &unstructured.Unstructured{
 		Object: map[string]interface{}{
