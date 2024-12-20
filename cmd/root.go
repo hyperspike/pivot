@@ -3,8 +3,6 @@ package main
 import (
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
-
-	"go.uber.org/zap"
 )
 
 var rootCmd = &cobra.Command{
@@ -13,14 +11,12 @@ var rootCmd = &cobra.Command{
 }
 
 func main() {
-	logger := zap.NewExample().Sugar()
-	defer logger.Sync()
 	rootCmd.PersistentFlags().StringP("format", "f", "text", "output format")
 	rootCmd.PersistentFlags().StringP("context", "c", "", "use an explicit Kubernetes context [env PIVOT_CONTEXT]")
 	if err := viper.BindPFlag("PIVOT_CONTEXT", rootCmd.PersistentFlags().Lookup("context")); err != nil {
-		logger.Fatalln("failed to bind flag", err)
+		panic(err)
 	}
 	if err := rootCmd.Execute(); err != nil {
-		logger.Fatalln("failed to execute command", err)
+		panic(err)
 	}
 }

@@ -26,6 +26,8 @@ func getLogger(cmd *cobra.Command) *zap.SugaredLogger {
 			panic(err)
 		}
 	}
-	defer Logger.Sync()
+	defer func() {
+		_ = Logger.Sync()
+	}()
 	return Logger.Sugar()
 }
