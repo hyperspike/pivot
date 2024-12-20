@@ -14,7 +14,7 @@ var proxyCmd = &cobra.Command{
 	Short: "proxy a service",
 	Run: func(cmd *cobra.Command, args []string) {
 		ctx := context.TODO()
-		forwarder, err := proxy.NewForwarder(ctx, cmd.Flag("context").Value.String())
+		forwarder, err := proxy.NewForwarder(ctx, getLogger(cmd), cmd.Flag("context").Value.String())
 		if err != nil {
 			panic(err)
 		}
@@ -26,10 +26,6 @@ var proxyCmd = &cobra.Command{
 
 func init() {
 	viper.AutomaticEnv()
-	proxyCmd.Flags().String("context", "", "kubernetes context, defaults to current context")
-	if err := viper.BindPFlag("PIVOT_CONTEXT", proxyCmd.Flags().Lookup("context")); err != nil {
-		panic(err)
-	}
 	proxyCmd.Flags().String("name", "", "name of the pod to proxy")
 	if err := viper.BindPFlag("POD_NAME", proxyCmd.Flags().Lookup("name")); err != nil {
 		panic(err)

@@ -13,12 +13,10 @@ IMAGE ?= pivot
 build: pivot
 
 pivot: $(SRC)
-	$Qgo build $(VV) -o $@ ./cmd/
-
-.PHONY: clean
-clean:
-	$Qrm -f pivot
-	$Qgo clean -cache -testcache -modcache
+	$QGCO_ENABLED=0 go build $(VV) \
+		-trimpath \
+		-installsuffix cgo \
+		-o $@ ./cmd/
 
 .PHONY: gosec lint
 gosec:
@@ -33,3 +31,10 @@ container: Dockerfile pivot
 .PHONY: test
 test:
 	$Qgo test $(VV) ./...
+
+.PHONY: clean real-clean
+clean:
+	$Qrm -f pivot infra postgres-operator
+
+real-clean: clean
+	$Qgo clean -cache -testcache -modcache

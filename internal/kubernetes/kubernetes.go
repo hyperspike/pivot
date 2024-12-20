@@ -1,4 +1,4 @@
-package spool
+package kubernetes
 
 import (
 	"context"
@@ -8,6 +8,8 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/pkg/errors"
+	"go.uber.org/zap"
 	"golang.org/x/exp/maps"
 	goyaml "gopkg.in/yaml.v2"
 
@@ -31,28 +33,32 @@ type K8s struct {
 	list   map[string][]*unstructured.Unstructured
 	dryRun bool
 	ctx    context.Context
+	log    *zap.SugaredLogger
 }
 
-func NewK8s(ctx context.Context, kubeContext string, dryRun bool) (*K8s, error) {
+func NewK8s(ctx context.Context, log *zap.SugaredLogger, kubeContext string, dryRun bool) (*K8s, error) {
 	KubeContext = kubeContext
 	if ctx == nil {
 		ctx = context.TODO()
 	}
-	k := &K8s{ctx: ctx}
+	log = log.Named("k8s").With("context", kubeContext)
+	k := &K8s{ctx: ctx, log: log}
 	k.list = make(map[string][]*unstructured.Unstructured)
 	if dryRun {
 		k.dryRun = true
-		fmt.Println("Dry run enabled")
+		k.log.Info("Dry run enabled")
 		return k, nil
 	}
 
 	config, err := GetKubeConfig()
 	if err != nil {
-		return nil, fmt.Errorf("failed to get k8s config: %w", err)
+		k.log.Errorw("failed to get k8s config", "error", err)
+		return nil, errors.Wrap(err, "")
 	}
 	client, err := dynamic.NewForConfig(config)
 	if err != nil {
-		return nil, fmt.Errorf("failed to create k8s client: %w", err)
+		k.log.Errorw("failed to create k8s client", "error", err)
+		return nil, errors.Wrap(err, "")
 	}
 	k.client = client
 
@@ -64,14 +70,17 @@ func (k *K8s) ApplyKustomize(path string) error {
 	fsys := filesys.MakeFsOnDisk()
 	m, err := kustomize.Run(fsys, path)
 	if err != nil {
-		return fmt.Errorf("failed to run kustomize: %w", err)
+		k.log.Errorw("failed to run kustomize", "error", err)
+		return errors.Wrap(err, "")
 	}
 	if err != nil {
-		return fmt.Errorf("failed to convert kustomize to yaml: %w", err)
+		k.log.Errorw("failed to run kustomize", "error", err)
+		return errors.Wrap(err, "")
 	}
 	for _, r := range m.Resources() {
 		if err := k.ApplyResource(r); err != nil {
-			return fmt.Errorf("failed to apply resource: %w", err)
+			k.log.Errorw("failed to apply resource", "error", err)
+			return errors.Wrap(err, "")
 		}
 	}
 
@@ -82,12 +91,14 @@ func (k *K8s) ApplyResource(res *resource.Resource) error {
 	decoder := yaml.NewDecodingSerializer(unstructured.UnstructuredJSONScheme)
 	y, err := res.AsYAML()
 	if err != nil {
-		return fmt.Errorf("failed to convert resource to yaml: %w", err)
+		k.log.Errorw("failed to convert resource to yaml", "error", err)
+		return errors.Wrap(err, "")
 	}
 	obj := &unstructured.Unstructured{}
 	_, _, err = decoder.Decode(y, nil, obj)
 	if err != nil {
-		return fmt.Errorf("failed to decode resource: %w", err)
+		k.log.Errorw("failed to decode resource", "error", err)
+		return errors.Wrap(err, "")
 	}
 	namespace := res.GetNamespace()
 	resource := strings.ToLower(res.GetGvk().Kind)
@@ -103,17 +114,18 @@ func (k *K8s) ApplyResource(res *resource.Resource) error {
 	}
 	kind := obj.GetKind()
 	if k.dryRun {
-		fmt.Printf("Dry run: Creating %v\n", gvr)
+		k.log.Infow("Dry run: Creating resource", "namespace", namespace, "kind", kind, "name", obj.GetName())
 		return nil
 	}
-	fmt.Printf("Creating %v\n", gvr)
+	k.log.Infow("Creating resource", "namespace", namespace, "kind", kind, "name", obj.GetName())
 	if kind == "Namespace" || kind == "CustomResourceDefinition" || kind == "ClusterRole" || kind == "ClusterRoleBinding" {
 		_, err := k.client.Resource(gvr).Create(k.ctx, obj, metav1.CreateOptions{})
 		// ignore error if already exists
 		if err != nil && strings.Contains(err.Error(), "already exists") {
 			return nil
 		} else if err != nil {
-			return fmt.Errorf("failed to create kind [%s] resource: %w", kind, err)
+			k.log.Errorw("failed to create resource", "error", err)
+			return errors.Wrap(err, "")
 		}
 		return nil
 	}
@@ -121,8 +133,8 @@ func (k *K8s) ApplyResource(res *resource.Resource) error {
 	if err != nil && strings.Contains(err.Error(), "already exists") {
 		return nil
 	} else if err != nil {
-		fmt.Println(string(y))
-		return fmt.Errorf("failed to create ns [%s] kind [%s] resource: %w", namespace, kind, err)
+		k.log.Errorw("failed to create resource", "error", err, "namespace", namespace, "kind", kind)
+		return errors.Wrap(err, "")
 	}
 
 	return nil
@@ -162,14 +174,15 @@ func (k *K8s) CreateArgoInit(path, user, password string) error {
 		Resource: "secrets",
 	}
 	if k.dryRun {
-		fmt.Printf("Dry run: Creating %v\n", gvr)
+		k.log.Infow("Dry run: Creating resource", "namespace", "argocd", "kind", "Secret", "name", "infra-repo")
 	} else {
-		fmt.Printf("Creating %v\n", gvr)
+		k.log.Infow("Creating resource", "namespace", "argocd", "kind", "Secret", "name", "infra-repo")
 		_, err := k.client.Resource(gvr).Namespace("argocd").Create(k.ctx, repo, metav1.CreateOptions{})
 		if err != nil && strings.Contains(err.Error(), "already exists") {
-			fmt.Println("Repo already exists, ignoring")
+			k.log.Infow("Repo already exists, ignoring")
 		} else if err != nil {
-			return fmt.Errorf("failed to create repo resource: %w", err)
+			k.log.Errorw("failed to create repo resource", "error", err)
+			return errors.Wrap(err, "")
 		}
 	}
 
@@ -213,14 +226,15 @@ func (k *K8s) CreateArgoInit(path, user, password string) error {
 		Resource: "applications",
 	}
 	if k.dryRun {
-		fmt.Printf("Dry run: Creating %v\n", gvr)
+		k.log.Infow("Dry run: Creating resource", "namespace", "argocd", "kind", "Application", "name", "init")
 	} else {
-		fmt.Printf("Creating %v\n", gvr)
+		k.log.Infow("Creating resource", "namespace", "argocd", "kind", "Application", "name", "init")
 		_, err := k.client.Resource(gvr).Namespace("argocd").Create(k.ctx, argo, metav1.CreateOptions{})
 		if err != nil && strings.Contains(err.Error(), "already exists") {
-			fmt.Println("Argo already exists, ignoring")
+			k.log.Infow("Argo already exists, ignoring")
 		} else if err != nil {
-			return fmt.Errorf("failed to create argo resource: %w", err)
+			k.log.Errorw("failed to create argo resource", "error", err)
+			return errors.Wrap(err, "")
 		}
 	}
 
@@ -305,15 +319,18 @@ func (k *K8s) GetPivotPassword() (string, error) {
 		Resource: "secrets",
 	}).Namespace("default").Get(k.ctx, "pivot-password", metav1.GetOptions{})
 	if err != nil {
-		return "", fmt.Errorf("failed to get secret: %w", err)
+		k.log.Errorw("failed to get secret", "error", err)
+		return "", errors.Wrap(err, "")
 	}
 	pass, _, err := unstructured.NestedString(secret.Object, "data", "password")
 	if err != nil {
-		return "", fmt.Errorf("failed to get password: %w", err)
+		k.log.Errorw("failed to get password", "error", err)
+		return "", errors.Wrap(err, "")
 	}
 	passb64, err := base64.StdEncoding.DecodeString(pass)
 	if err != nil {
-		return "", fmt.Errorf("failed to decode password: %w", err)
+		k.log.Errorw("failed to decode password", "error", err)
+		return "", errors.Wrap(err, "")
 	}
 	return string(passb64), nil
 }
@@ -345,14 +362,15 @@ func (k *K8s) CreateGitea(path, user, password, domain string) error {
 		Resource: "gitea",
 	}
 	if k.dryRun {
-		fmt.Printf("Dry run: Creating %v\n", gvr)
+		k.log.Infow("Dry run: Creating resource", "namespace", "default", "kind", "Gitea", "name", "gitea")
 	} else {
-		fmt.Printf("Creating %v\n", gvr)
+		k.log.Infow("Creating resource", "namespace", "default", "kind", "Gitea", "name", "gitea")
 		_, err := k.client.Resource(gvr).Namespace("default").Create(k.ctx, gitea, metav1.CreateOptions{})
 		if err != nil && strings.Contains(err.Error(), "already exists") {
-			fmt.Println("Gitea already exists, ignoring")
+			k.log.Infow("Gitea already exists, ignoring")
 		} else if err != nil {
-			return fmt.Errorf("failed to create gitea resource: %w", err)
+			k.log.Errorw("failed to create gitea resource", "error", err)
+			return errors.Wrap(err, "")
 		}
 	}
 
@@ -378,14 +396,15 @@ func (k *K8s) CreateGitea(path, user, password, domain string) error {
 		Resource: "secrets",
 	}
 	if k.dryRun {
-		fmt.Printf("Dry run: Creating %v\n", gvr)
+		k.log.Infow("Dry run: Creating resource", "namespace", "default", "kind", "Secret", "name", user+"-password")
 	} else {
-		fmt.Printf("Creating %v\n", gvr)
+		k.log.Infow("Creating resource", "namespace", "default", "kind", "Secret", "name", user+"-password")
 		_, err := k.client.Resource(gvr).Namespace("default").Create(k.ctx, passwordSecret, metav1.CreateOptions{})
 		if err != nil && strings.Contains(err.Error(), "already exists") {
-			fmt.Println("Password already exists, ignoring")
+			k.log.Infow("Password already exists, ignoring")
 		} else if err != nil {
-			return fmt.Errorf("failed to create password resource: %w", err)
+			k.log.Errorw("failed to create password resource", "error", err)
+			return errors.Wrap(err, "")
 		}
 	}
 
@@ -416,14 +435,15 @@ func (k *K8s) CreateGitea(path, user, password, domain string) error {
 		Resource: "users",
 	}
 	if k.dryRun {
-		fmt.Printf("Dry run: Creating %v\n", gvr)
+		k.log.Infow("Dry run: Creating resource", "namespace", "default", "kind", "User", "name", user)
 	} else {
-		fmt.Printf("Creating %v\n", gvr)
+		k.log.Infow("Creating resource", "namespace", "default", "kind", "User", "name", user)
 		_, err := k.client.Resource(gvr).Namespace("default").Create(k.ctx, giteaUser, metav1.CreateOptions{})
 		if err != nil && strings.Contains(err.Error(), "already exists") {
-			fmt.Println("User already exists, ignoring")
+			k.log.Infow("User already exists, ignoring")
 		} else if err != nil {
-			return fmt.Errorf("failed to create user resource: %w", err)
+			k.log.Errorw("failed to create user resource", "error", err)
+			return errors.Wrap(err, "")
 		}
 	}
 
@@ -459,14 +479,15 @@ func (k *K8s) CreateGitea(path, user, password, domain string) error {
 		Resource: "orgs",
 	}
 	if k.dryRun {
-		fmt.Printf("Dry run: Creating %v\n", gvr)
+		k.log.Infow("Dry run: Creating resource", "namespace", "default", "kind", "Org", "name", "infra")
 	} else {
-		fmt.Printf("Creating %v\n", gvr)
+		k.log.Infow("Creating resource", "namespace", "default", "kind", "Org", "name", "infra")
 		_, err := k.client.Resource(gvr).Namespace("default").Create(k.ctx, org, metav1.CreateOptions{})
 		if err != nil && strings.Contains(err.Error(), "already exists") {
-			fmt.Println("Org already exists, ignoring")
+			k.log.Infow("Org already exists, ignoring")
 		} else if err != nil {
-			return fmt.Errorf("failed to create org resource: %w", err)
+			k.log.Errorw("failed to create org resource", "error", err)
+			return errors.Wrap(err, "")
 		}
 	}
 
@@ -493,14 +514,15 @@ func (k *K8s) CreateGitea(path, user, password, domain string) error {
 		Resource: "repoes",
 	}
 	if k.dryRun {
-		fmt.Printf("Dry run: Creating %v\n", gvr)
+		k.log.Infow("Dry run: Creating resource", "namespace", "default", "kind", "Repo", "name", "infra")
 	} else {
-		fmt.Printf("Creating %v\n", gvr)
+		k.log.Infow("Creating resource", "namespace", "default", "kind", "Repo", "name", "infra")
 		_, err := k.client.Resource(gvr).Namespace("default").Create(k.ctx, repo, metav1.CreateOptions{})
 		if err != nil && strings.Contains(err.Error(), "already exists") {
-			fmt.Println("Repo already exists, ignoring")
+			k.log.Infow("Repo already exists, ignoring")
 		} else if err != nil {
-			return fmt.Errorf("failed to create repo resource: %w", err)
+			k.log.Errorw("failed to create repo resource", "error", err)
+			return errors.Wrap(err, "")
 		}
 	}
 	return nil
@@ -508,13 +530,15 @@ func (k *K8s) CreateGitea(path, user, password, domain string) error {
 
 func (k *K8s) WriteGiteaToFile(path string) error {
 	if len(k.list["gitea"]) == 0 {
-		return fmt.Errorf("no objects to write, you may need to run CreateGitea first")
+		k.log.Error("no objects to write, you may need to run CreateGitea first")
+		return errors.New("no objects to write, you may need to run CreateGitea first")
 	}
 	return k.writeToFile("gitea", path)
 }
 func (k *K8s) WriteArgoToFile(path string) error {
 	if len(k.list["argocd"]) == 0 {
-		return fmt.Errorf("no objects to write, you may need to run CreateArgoInit first")
+		k.log.Error("no objects to write, you may need to run CreateArgoInit first")
+		return errors.New("no objects to write, you may need to run CreateArgoInit first")
 	}
 	return k.writeToFile("argocd", path)
 }
@@ -522,27 +546,33 @@ func (k *K8s) WriteArgoToFile(path string) error {
 func (k *K8s) writeToFile(list, path string) error {
 	if strings.Count(path, "/") > 1 {
 		if err := os.MkdirAll(filepath.Dir(path), 0750); err != nil {
-			return fmt.Errorf("failed to create directory: %w", err)
+			k.log.Errorw("failed to create directory", "error", err)
+			return errors.Wrap(err, "")
 		}
 	}
 	f, err := os.OpenFile(filepath.Clean(path), os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0600)
 	if err != nil {
-		return fmt.Errorf("failed to create file: %w", err)
+		k.log.Errorw("failed to create file", "error", err)
+		return errors.Wrap(err, "")
 	}
 	defer f.Close()
 	if len(k.list[list]) == 0 {
-		return fmt.Errorf("no objects to write, you may need to run CreateGitea first")
+		k.log.Error("no objects to write, you may need to run CreateGitea first")
+		return errors.New("no objects to write, you may need to run CreateGitea first")
 	}
 	for _, obj := range k.list[list] {
 		y, err := goyaml.Marshal(obj.Object)
 		if err != nil {
-			return fmt.Errorf("failed to marshal object: %w", err)
+			k.log.Errorw("failed to marshal object", "error", err)
+			return errors.Wrap(err, "")
 		}
 		if _, err = f.Write([]byte("---\n")); err != nil {
-			return fmt.Errorf("failed to write to file: %w", err)
+			k.log.Errorw("failed to write to file", "error", err)
+			return errors.Wrap(err, "")
 		}
 		if _, err = f.Write(y); err != nil {
-			return fmt.Errorf("failed to write to file: %w", err)
+			k.log.Errorw("failed to write to file", "error", err)
+			return errors.Wrap(err, "")
 		}
 	}
 	return nil

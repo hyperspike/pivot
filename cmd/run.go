@@ -11,9 +11,11 @@ import (
 
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
+	"go.uber.org/zap"
 
+	"hyperspike.io/pivot/internal/git"
+	"hyperspike.io/pivot/internal/kubernetes"
 	"hyperspike.io/pivot/internal/proxy"
-	"hyperspike.io/pivot/internal/spool"
 )
 
 var runCmd = &cobra.Command{
@@ -21,69 +23,70 @@ var runCmd = &cobra.Command{
 	Short: "start pivoting",
 	Run: func(cmd *cobra.Command, args []string) {
 		ctx := context.TODO()
-		r, err := spool.CreateRepo(ctx, "infra")
+		log := getLogger(cmd)
+		r, err := git.CreateRepo(ctx, log, "infra")
 		if err != nil {
-			panic(err)
+			return
 		}
 		dryRun := cmd.Flag("dry-run").Value.String() == "true"
-		k8s, err := spool.NewK8s(ctx, cmd.Flag("context").Value.String(), dryRun)
+		k8s, err := kubernetes.NewK8s(ctx, log, cmd.Flag("context").Value.String(), dryRun)
 		if err != nil {
-			panic(err)
+			log.Fatalw("failed to create k8s", "error", err)
 		}
 		if err := k8s.ApplyKustomize("infra/cert-manager"); err != nil {
-			panic(err)
+			log.Fatalw("failed to apply cert-manager", "error", err)
 		}
 		if err := k8s.ApplyKustomize("infra/argocd"); err != nil {
-			panic(err)
+			log.Fatalw("failed to apply argocd", "error", err)
 		}
 		if err := k8s.ApplyKustomize("infra/postgres-operator"); err != nil {
-			panic(err)
+			log.Fatalw("failed to apply postgres-operator", "error", err)
 		}
 		if err := k8s.ApplyKustomize("infra/valkey-operator"); err != nil {
-			panic(err)
+			log.Fatalw("failed to apply valkey-operator", "error", err)
 		}
 		if err := k8s.ApplyKustomize("infra/gitea-operator"); err != nil {
-			panic(err)
+			log.Fatalw("failed to apply gitea-operator", "error", err)
 		}
 		pass := cmd.Flag("password").Value.String()
 		if pass == "" {
 			pass, err = randString(16)
 			if err != nil {
-				panic(err)
+				log.Fatalw("failed to generate password", "error", err)
 			}
 		}
 		remote := cmd.Flag("remote").Value.String()
 		user := cmd.Flag("user").Value.String()
 		if err := k8s.CreateGitea("", user, pass, remote); err != nil {
-			panic(err)
+			log.Fatalw("failed to create gitea", "error", err)
 		}
 		if err := k8s.WriteGiteaToFile("infra/gitea/gitea.yaml"); err != nil {
-			panic(err)
+			log.Fatalw("failed to write gitea to file", "error", err)
 		}
 		if err := r.AddExisting("gitea/gitea.yaml"); err != nil {
-			panic(err)
+			log.Fatalw("failed to add existing gitea", "error", err)
 		}
 		if err := r.GenerateKustomize("default", "gitea"); err != nil {
-			panic(err)
+			log.Fatalw("failed to generate kustomize", "error", err)
 		}
 
 		repoURL := "https://localhost:3000/infra/infra.git"
 		if err := r.AddRemote("local", repoURL); err != nil {
-			panic(err)
+			log.Fatalw("failed to add remote", "error", err)
 		}
 		repoURL = "https://" + remote + "/infra/infra.git"
 		if err := r.AddRemote("origin", repoURL); err != nil {
-			panic(err)
+			log.Fatalw("failed to add remote", "error", err)
 		}
 		if !dryRun {
 			failed := true
 			go func() {
-				forwarder, err := proxy.NewForwarder(ctx, cmd.Flag("context").Value.String())
+				forwarder, err := proxy.NewForwarder(ctx, log, cmd.Flag("context").Value.String())
 				if err != nil {
-					panic(err)
+					log.Fatalw("failed to create forwarder", "error", err)
 				}
 				if err := forwarder.ForwardPorts("", "", ""); err != nil {
-					panic(err)
+					log.Fatalw("failed to forward ports", "error", err)
 				}
 			}()
 			for tries := 0; tries < 60; tries++ {
@@ -103,26 +106,26 @@ var runCmd = &cobra.Command{
 				time.Sleep(3 * time.Second)
 			}
 			if failed {
-				panic("failed to push to remote")
+				log.Fatal("failed to push to remote")
 			}
 		}
 
 		if err := k8s.CreateArgoInit("", user, pass); err != nil {
-			panic(err)
+			log.Fatalw("failed to create argo init", "error", err)
 		}
 		if err := k8s.WriteArgoToFile("infra/init/init.yaml"); err != nil {
-			panic(err)
+			log.Fatalw("failed to write argo to file", "error", err)
 		}
 		if err := r.AddExisting("init/init.yaml"); err != nil {
-			panic(err)
+			log.Fatalw("failed to add existing argo", "error", err)
 		}
 		if err := r.GenerateKustomize("argocd", "init"); err != nil {
-			panic(err)
+			log.Fatalw("failed to generate kustomize", "error", err)
 		}
 		if !dryRun {
 			for tries := 0; tries < 60; tries++ {
 				if err := r.PushBasic("local", user, pass); err != nil {
-					fmt.Printf("[try %d] push failed: %v\n", tries, err)
+					log.Warnf("push failed: %v", err, zap.Int("try", tries))
 				} else {
 					break
 				}
@@ -172,10 +175,6 @@ func init() {
 	}
 	runCmd.Flags().StringP("namespace", "n", "", "namespace (context default if not set) [env PIVOT_NAMESPACE]")
 	if err := viper.BindPFlag("PIVOT_NAMESPACE", runCmd.Flags().Lookup("namespace")); err != nil {
-		panic(err)
-	}
-	runCmd.Flags().StringP("context", "c", "", "use an explicit Kubernetes context [env PIVOT_CONTEXT]")
-	if err := viper.BindPFlag("PIVOT_CONTEXT", runCmd.Flags().Lookup("context")); err != nil {
 		panic(err)
 	}
 }
