@@ -29,5 +29,6 @@ func getLogger(cmd *cobra.Command) *zap.SugaredLogger {
 	defer func() {
 		_ = Logger.Sync()
 	}()
+	Logger.Sugar().Infow("Pivoting", "version", Version, "commit", Commit)
 	return Logger.Sugar()
 }

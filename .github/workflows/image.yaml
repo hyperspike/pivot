@@ -15,6 +15,45 @@ env:
   IMAGE_NAME: ${{ github.repository }}
 
 jobs:
+  build-and-push-cli:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read # for trivy scan upload
+      packages: write
+      id-token: write
+      attestations: write
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+
+    - name: Setup Go ${{ matrix.go-version }}
+      uses: actions/setup-go@v5
+      with:
+        go-version: 1.24
+    # You can test your matrix by printing the current Go version
+    - name: Display Go version
+      run: go version
+    - name: Build it
+      id: go_build
+      run: make V=1 cli
+    - name: Attest
+      uses: actions/attest-build-provenance@v2
+      id: attest
+      with:
+        subject-path: |
+          pivot-darwin-amd64
+          pivot-darwin-arm64
+          pivot-linux-amd64
+          pivot-linux-arm64
+    - name: Upload dist/install.yaml to release
+      uses: svenstaro/upload-release-action@v2
+      with:
+        repo_token: ${{ secrets.GITHUB_TOKEN }}
+        file: pivot-*
+        file_glob: true
+        tag: ${{ github.ref }}
+        overwrite: true
+
   build-and-push-image:
     runs-on: ubuntu-latest
     permissions:
@@ -44,7 +83,7 @@ jobs:
     - name: Setup Go ${{ matrix.go-version }}
       uses: actions/setup-go@v5
       with:
-        go-version: 1.23
+        go-version: 1.24
     # You can test your matrix by printing the current Go version
     - name: Display Go version
       run: go version
