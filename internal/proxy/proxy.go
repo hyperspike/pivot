@@ -7,7 +7,8 @@ import (
 	"os"
 	"time"
 
-	"hyperspike.io/pivot/internal/spool"
+	"go.uber.org/zap"
+	"hyperspike.io/pivot/internal/kubernetes"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/runtime/serializer"
@@ -27,11 +28,13 @@ type Forwarder struct {
 	StopChannel  chan struct{}
 	ReadyChannel chan struct{}
 	*genericiooptions.IOStreams
+	log *zap.SugaredLogger
 }
 
 func (f *Forwarder) createDialer(url *url.URL) (httpstream.Dialer, error) {
 	transport, upgrader, err := spdy.RoundTripperFor(f.Config)
 	if err != nil {
+		f.log.Errorw("Failed to create round tripper", "error", err)
 		return nil, err
 	}
 	dialer := spdy.NewDialer(upgrader, &http.Client{Transport: transport}, "POST", url)
@@ -50,19 +53,22 @@ func (f *Forwarder) createDialer(url *url.URL) (httpstream.Dialer, error) {
 	return dialer, nil
 }
 
-func NewForwarder(ctx context.Context, kubeContext string) (*Forwarder, error) {
+func NewForwarder(ctx context.Context, log *zap.SugaredLogger, kubeContext string) (*Forwarder, error) {
 	if ctx == nil {
 		ctx = context.TODO()
 	}
+	log = log.Named("proxy").With("context", kubeContext)
 	f := &Forwarder{
 		ctx:          ctx,
 		IOStreams:    &genericiooptions.IOStreams{In: os.Stdin, Out: os.Stdout, ErrOut: os.Stderr},
 		StopChannel:  make(chan struct{}, 1),
 		ReadyChannel: make(chan struct{}),
+		log:          log,
 	}
-	spool.KubeContext = kubeContext
-	rest, err := spool.GetKubeConfig()
+	kubernetes.KubeContext = kubeContext
+	rest, err := kubernetes.GetKubeConfig()
 	if err != nil {
+		f.log.Errorw("Failed to get kubeconfig", "error", err)
 		return nil, err
 	}
 	rest.GroupVersion = &schema.GroupVersion{Group: "api", Version: "v1"}
@@ -70,6 +76,7 @@ func NewForwarder(ctx context.Context, kubeContext string) (*Forwarder, error) {
 	f.Config = rest
 	f.Client, err = restclient.RESTClientFor(f.Config)
 	if err != nil {
+		f.log.Errorw("Failed to create REST client", "error", err)
 		return nil, err
 	}
 	return f, nil
@@ -97,12 +104,14 @@ func (f *Forwarder) ForwardPorts(name, namespace, port string) error {
 			tries = tries + 1
 			time.Sleep(5 * time.Second)
 			if tries > 60 {
+				f.log.Errorw("Failed to get pod", "error", resp.Error())
 				return resp.Error()
 			}
 			continue
 		}
 		pod := &corev1.Pod{}
 		if err := resp.Into(pod); err != nil {
+			f.log.Errorw("Failed to get pod", "error", err)
 			return err
 		}
 		if pod.Status.Phase == corev1.PodRunning {
@@ -111,6 +120,7 @@ func (f *Forwarder) ForwardPorts(name, namespace, port string) error {
 		tries = tries + 1
 		time.Sleep(5 * time.Second)
 		if tries > 60 {
+			f.log.Errorw("Pod not running", "pod", pod)
 			return resp.Error()
 		}
 	}
@@ -122,10 +132,12 @@ func (f *Forwarder) ForwardPorts(name, namespace, port string) error {
 		SubResource("portforward")
 	dialer, err := f.createDialer(req.URL())
 	if err != nil {
+		f.log.Errorw("Failed to create dialer", "error", err)
 		return err
 	}
 	fw, err := portforward.NewOnAddresses(dialer, []string{"127.0.0.1"}, []string{port}, f.StopChannel, f.ReadyChannel, f.Out, f.ErrOut)
 	if err != nil {
+		f.log.Errorw("Failed to create port forwarder", "error", err)
 		return err
 	}
 	return fw.ForwardPorts()

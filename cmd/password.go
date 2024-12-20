@@ -5,8 +5,7 @@ import (
 	"fmt"
 
 	"github.com/spf13/cobra"
-	"github.com/spf13/viper"
-	"hyperspike.io/pivot/internal/spool"
+	"hyperspike.io/pivot/internal/kubernetes"
 )
 
 var passwordCmd = &cobra.Command{
@@ -14,7 +13,7 @@ var passwordCmd = &cobra.Command{
 	Short: "fetch the generated pivot password",
 	Run: func(cmd *cobra.Command, args []string) {
 		ctx := context.TODO()
-		kube, err := spool.NewK8s(ctx, cmd.Flag("context").Value.String(), false)
+		kube, err := kubernetes.NewK8s(ctx, getLogger(cmd), cmd.Flag("context").Value.String(), false)
 		if err != nil {
 			panic(err)
 		}
@@ -27,10 +26,5 @@ var passwordCmd = &cobra.Command{
 }
 
 func init() {
-	viper.AutomaticEnv()
-	passwordCmd.Flags().String("context", "", "kubernetes context, defaults to current context")
-	if err := viper.BindPFlag("PIVOT_CONTEXT", passwordCmd.Flags().Lookup("context")); err != nil {
-		panic(err)
-	}
 	rootCmd.AddCommand(passwordCmd)
 }

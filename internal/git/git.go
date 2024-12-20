@@ -1,4 +1,4 @@
-package spool
+package git
 
 import (
 	"context"
@@ -16,6 +16,7 @@ import (
 	"github.com/go-git/go-git/v5/plumbing"
 	"github.com/go-git/go-git/v5/plumbing/object"
 	githttp "github.com/go-git/go-git/v5/plumbing/transport/http"
+	"go.uber.org/zap"
 )
 
 type Spool struct {
@@ -23,6 +24,7 @@ type Spool struct {
 	Path   string
 	Remote string
 	ctx    context.Context
+	log    *zap.SugaredLogger
 }
 
 var (
@@ -40,7 +42,7 @@ func RepoExists(path string) bool {
 }
 
 // Create a new git repository and adds the initial GitOps tooling
-func CreateRepo(ctx context.Context, path string) (*Spool, error) {
+func CreateRepo(ctx context.Context, log *zap.SugaredLogger, path string) (*Spool, error) {
 	if ctx == nil {
 		ctx = context.TODO()
 	}
@@ -50,13 +52,16 @@ func CreateRepo(ctx context.Context, path string) (*Spool, error) {
 			DefaultBranch: plumbing.Main,
 		},
 	})
+	log = log.Named("git").With("path", path)
 	if err != nil {
+		log.Errorw("failed to create git repo", "error", err)
 		return nil, err
 	}
 	s := &Spool{
 		Path: path,
 		Repo: repo,
 		ctx:  ctx,
+		log:  log,
 	}
 	if err = s.readme(); err != nil {
 		return nil, err
@@ -68,6 +73,7 @@ func CreateRepo(ctx context.Context, path string) (*Spool, error) {
 		return nil, err
 	}
 	if err = s.addNamespace("argocd", "adding argo-cd namespace"); err != nil {
+		s.log.Errorw("failed to add argo-cd namespace", "error", err)
 		return nil, err
 	}
 	if err = s.createKustomization("argocd", "adding argo-cd kustomization"); err != nil {
@@ -149,20 +155,25 @@ func (s *Spool) readme() error {
 	}
 	f := filepath.Join(s.Path, "README.md")
 	if err = os.WriteFile(f, []byte("# Pivot GitOps"), 0600); err != nil {
+		s.log.Errorw("failed to write README.md", "error", err)
 		return err
 	}
 	if _, err = w.Add("README.md"); err != nil {
+		s.log.Errorw("failed to add README.md", "error", err)
 		return err
 	}
 	if err = s.commit("Initial commit"); err != nil {
+		s.log.Errorw("failed to commit README.md", "error", err)
 		return err
 	}
 	return nil
 }
 
 func (s *Spool) commit(msg string) error {
+	s.log.Infow("committing", "message", msg)
 	w, err := s.Repo.Worktree()
 	if err != nil {
+		s.log.Errorw("failed to get worktree", "error", err)
 		return err
 	}
 	if _, err = w.Commit(msg, &git.CommitOptions{
@@ -172,6 +183,7 @@ func (s *Spool) commit(msg string) error {
 			When:  time.Now(),
 		},
 	}); err != nil {
+		s.log.Errorw("failed to commit", "error", err)
 		return err
 	}
 	return nil
@@ -190,15 +202,25 @@ func (s *Spool) AddRemote(name, remote string) error {
 }
 
 func (s *Spool) PushBasic(remote, user, pass string) error {
+	remoteObj, err := s.Repo.Remote(remote)
+	if err != nil {
+		s.log.Errorw("failed to get remote", "error", err, "remote", remote)
+		return err
+	}
+	s.log.Infow("pushing", "remote", remote, "url", remoteObj.Config().URLs[0])
 	auth := &githttp.BasicAuth{
 		Username: user,
 		Password: pass,
 	}
-	return s.Repo.Push(&git.PushOptions{
+	err = s.Repo.Push(&git.PushOptions{
 		RemoteName:      remote,
 		InsecureSkipTLS: true,
 		Auth:            auth,
 	})
+	if err != nil {
+		s.log.Errorw("failed to push", "error", err)
+	}
+	return err
 }
 
 func (s *Spool) AddExisting(path string) error {
@@ -232,12 +254,12 @@ func (s *Spool) concatFiles(files []string, filePath, separator, msg string) err
 	fh, err := os.OpenFile(filepath.Clean(f), os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0600)
 	defer func() {
 		if err := fh.Close(); err != nil {
-			fmt.Println(err)
+			s.log.Errorw("error closing file", "error", err)
 		}
 	}()
 	if err != nil {
 		if err := fh.Sync(); err != nil {
-			fmt.Println(err)
+			s.log.Errorw("error syncing file", "error", err)
 		}
 		return err
 	}
@@ -294,7 +316,7 @@ func (s *Spool) addUrl(url, filePath, msg string) error {
 	if err = os.WriteFile(f, readBody, 0600); err != nil {
 		return err
 	}
-	fmt.Println("Adding", filePath)
+	s.log.Infow("added file", "file", f)
 	if _, err = w.Add(filePath); err != nil {
 		return err
 	}
