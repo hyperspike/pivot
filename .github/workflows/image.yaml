@@ -67,7 +67,7 @@ jobs:
       run: |
         cosign sign --yes ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}${{ env.RELEASE_VERSION }}@${{ steps.docker_build.outputs.digest }}
 
-   - name: Attest
+    - name: Attest
       uses: actions/attest-build-provenance@v2
       id: attest
       with:
