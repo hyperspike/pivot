@@ -1,4 +1,4 @@
-FROM alpine:3.21.1 AS ca
+FROM alpine:3.21.2 AS ca
 
 RUN apk upgrade --no-cache \
 	&& apk add --no-cache ca-certificates=20241010-r0 zip=3.0-r13 tzdata=2024b-r1 \
