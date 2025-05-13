@@ -18,7 +18,9 @@ var proxyCmd = &cobra.Command{
 		if err != nil {
 			panic(err)
 		}
-		if err := forwarder.ForwardPorts(cmd.Flag("name").Value.String(), cmd.Flag("namespace").Value.String(), cmd.Flag("port").Value.String()); err != nil {
+		if err := forwarder.ForwardPorts(cmd.Flag("name").Value.String(),
+			cmd.Flag("namespace").Value.String(),
+			cmd.Flag("port").Value.String()); err != nil {
 			panic(err)
 		}
 	},
