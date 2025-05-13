@@ -12,7 +12,7 @@ func TestKubeContext(t *testing.T) {
 	if err == nil {
 		t.Errorf("Expected error when kube context does not exist")
 	}
-	os.Setenv("KUBECONFIG", "testdata/kubeconfig")
+	_ = os.Setenv("KUBECONFIG", "testdata/kubeconfig")
 	KubeContext = "default"
 	if err := os.Mkdir("testdata", 0755); err != nil {
 		t.Errorf("Error creating testdata directory %v", err)
@@ -26,8 +26,8 @@ func TestKubeContext(t *testing.T) {
 		if err := file.Close(); err != nil {
 			t.Errorf("Error closing kubeconfig file %v", err)
 		}
-		os.Remove("testdata/kubeconfig")
-		os.Remove("testdata")
+		_ = os.Remove("testdata/kubeconfig")
+		_ = os.Remove("testdata")
 	}()
 	if _, err := file.WriteString(`apiVersion: v1
 clusters:
