@@ -384,7 +384,12 @@ func (s *Spool) addNamespace(path, msg string) error {
 	if err != nil {
 		return err
 	}
-	defer fh.Close()
+	defer func() {
+		err := fh.Close()
+		if err != nil {
+			s.log.Errorw("error closing file", "error", err)
+		}
+	}()
 	if _, err = fh.Write([]byte("apiVersion: v1\nkind: Namespace\nmetadata:\n  name: " + path + "\n")); err != nil {
 		return err
 	}
@@ -428,7 +433,12 @@ func (s *Spool) createKustomizationWithNamespace(path, namespace, msg string) er
 	if err != nil {
 		return err
 	}
-	defer fhk.Close()
+	defer func() {
+		err := fhk.Close()
+		if err != nil {
+			s.log.Errorw("error closing file", "error", err)
+		}
+	}()
 	if _, err = fhk.Write([]byte("namespace: " + namespace + "\nresources:\n")); err != nil {
 		return err
 	}
