@@ -555,7 +555,12 @@ func (k *K8s) writeToFile(list, path string) error {
 		k.log.Errorw("failed to create file", "error", err)
 		return errors.Wrap(err, "")
 	}
-	defer f.Close()
+	defer func() {
+		err := f.Close()
+		if err != nil {
+			k.log.Errorw("failed to close file", "error", err)
+		}
+	}()
 	if len(k.list[list]) == 0 {
 		k.log.Error("no objects to write, you may need to run CreateGitea first")
 		return errors.New("no objects to write, you may need to run CreateGitea first")
