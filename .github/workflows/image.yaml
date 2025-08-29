@@ -24,7 +24,7 @@ jobs:
       attestations: write
     steps:
     - name: Checkout repository
-      uses: actions/checkout@v4
+      uses: actions/checkout@v5
 
     - name: Setup Go ${{ matrix.go-version }}
       uses: actions/setup-go@v5
@@ -65,7 +65,7 @@ jobs:
 
     steps:
     - name: Checkout repository
-      uses: actions/checkout@v4
+      uses: actions/checkout@v5
 
     - name: Log in to the Container registry
       uses: docker/login-action@74a5d142397b4f367a81961eba4e8cd7edddf772
