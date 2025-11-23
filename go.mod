@@ -7,7 +7,7 @@ require (
 	github.com/pkg/errors v0.9.1
 	github.com/spf13/cobra v1.10.1
 	github.com/spf13/viper v1.21.0
-	go.uber.org/zap v1.27.0
+	go.uber.org/zap v1.27.1
 	golang.org/x/exp v0.0.0-20240719175910-8a7402abbf56
 	gopkg.in/yaml.v2 v2.4.0
 	k8s.io/api v0.34.1
