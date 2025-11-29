@@ -57,7 +57,8 @@ var runCmd = &cobra.Command{
 		}
 		remote := cmd.Flag("remote").Value.String()
 		user := cmd.Flag("user").Value.String()
-		if err := k8s.CreateGitea("", user, pass, remote); err != nil {
+		valkey := cmd.Flag("valkey").Value.String() == "true"
+		if err := k8s.CreateGitea("", user, pass, remote, valkey); err != nil {
 			log.Fatalw("failed to create gitea", "error", err)
 		}
 		if err := k8s.WriteGiteaToFile("infra/gitea/gitea.yaml"); err != nil {
@@ -175,6 +176,10 @@ func init() {
 	}
 	runCmd.Flags().StringP("namespace", "n", "", "namespace (context default if not set) [env PIVOT_NAMESPACE]")
 	if err := viper.BindPFlag("PIVOT_NAMESPACE", runCmd.Flags().Lookup("namespace")); err != nil {
+		panic(err)
+	}
+	runCmd.Flags().BoolP("valkey", "k", false, "enable valkey support")
+	if err := viper.BindPFlag("PIVOT_VALKEY", runCmd.Flags().Lookup("valkey")); err != nil {
 		panic(err)
 	}
 }

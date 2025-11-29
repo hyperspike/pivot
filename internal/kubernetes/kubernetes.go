@@ -335,7 +335,7 @@ func (k *K8s) GetPivotPassword() (string, error) {
 	return string(passb64), nil
 }
 
-func (k *K8s) CreateGitea(path, user, password, domain string) error {
+func (k *K8s) CreateGitea(path, user, password, domain string, valkey bool) error {
 	gitea := &unstructured.Unstructured{
 		Object: map[string]interface{}{
 			"apiVersion": "hyperspike.io/v1",
@@ -346,7 +346,7 @@ func (k *K8s) CreateGitea(path, user, password, domain string) error {
 			},
 			"spec": map[string]interface{}{
 				"tls":        true,
-				"valkey":     true,
+				"valkey":     valkey,
 				"certIssuer": "selfsigned",
 				"ingress": map[string]interface{}{
 					"host": domain,
