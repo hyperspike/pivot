@@ -39,6 +39,9 @@ var runCmd = &cobra.Command{
 		if err := k8s.ApplyKustomize("infra/argocd"); err != nil {
 			log.Fatalw("failed to apply argocd", "error", err)
 		}
+		if err := k8s.CreateNamespace("postgres-operator"); err != nil {
+			log.Fatalw("failed to create postgres-operator namespace", "error", err)
+		}
 		if err := k8s.ApplyKustomize("infra/postgres-operator"); err != nil {
 			log.Fatalw("failed to apply postgres-operator", "error", err)
 		}

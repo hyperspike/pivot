@@ -87,6 +87,36 @@ func (k *K8s) ApplyKustomize(path string) error {
 	return nil
 }
 
+func (k *K8s) CreateNamespace(namespace string) error {
+	ns := &unstructured.Unstructured{
+		Object: map[string]interface{}{
+			"apiVersion": "v1",
+			"kind":       "Namespace",
+			"metadata": map[string]interface{}{
+				"name": namespace,
+			},
+		},
+	}
+	gvr := schema.GroupVersionResource{
+		Group:    "",
+		Version:  "v1",
+		Resource: "namespaces",
+	}
+	if k.dryRun {
+		k.log.Infow("Dry run: Creating resource", "kind", "Namespace", "name", namespace)
+		return nil
+	}
+	k.log.Infow("Creating resource", "kind", "Namespace", "name", namespace)
+	_, err := k.client.Resource(gvr).Create(k.ctx, ns, metav1.CreateOptions{})
+	if err != nil && strings.Contains(err.Error(), "already exists") {
+		return nil
+	} else if err != nil {
+		k.log.Errorw("failed to create resource", "error", err)
+		return errors.Wrap(err, "")
+	}
+	return nil
+}
+
 func (k *K8s) ApplyResource(res *resource.Resource) error {
 	decoder := yaml.NewDecodingSerializer(unstructured.UnstructuredJSONScheme)
 	y, err := res.AsYAML()
