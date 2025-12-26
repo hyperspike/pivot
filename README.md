@@ -2,6 +2,8 @@
 
 pivot from cluster-bootstraping to GitOps, Self-hosted, and self-managed, with a single command. Using [Gitea](https://github.com/hyperspike/gitea-operator) and [ArgoCD](https://argo-cd.readthedocs.io/en/stable/).
 
+skip to the tutorial: [here](./TUTORIAL.md)
+
 ## Usage
 
 ```bash
