@@ -13,7 +13,7 @@ func TestKubeContext(t *testing.T) {
 		t.Errorf("Expected error when kube context does not exist")
 	}
 	_ = os.Setenv("KUBECONFIG", "testdata/kubeconfig")
-	KubeContext = "default"
+	KubeContext = DEFAULT
 	if err := os.Mkdir("testdata", 0755); err != nil {
 		t.Errorf("Error creating testdata directory %v", err)
 	}
@@ -55,7 +55,7 @@ users:
 `); err != nil {
 		t.Errorf("Error writing to kubeconfig file %v", err)
 	}
-	KubeContext = "default"
+	KubeContext = DEFAULT
 
 	_, err = GetKubeConfig()
 	if err != nil {

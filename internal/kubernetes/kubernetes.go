@@ -27,6 +27,20 @@ import (
 	"sigs.k8s.io/kustomize/kyaml/filesys"
 )
 
+const (
+	APIVERSION = "apiVersion"
+	KIND       = "kind"
+	METADATA   = "metadata"
+	NAME       = "name"
+	NAMESPACE  = "namespace"
+	ARGOCD     = "argocd"
+	INIT       = "init"
+	DEFAULT    = "default"
+	PATH       = "path"
+	SPEC       = "spec"
+	GITEA      = "gitea"
+)
+
 type K8s struct {
 	// Kubernetes client
 	client *dynamic.DynamicClient
@@ -90,10 +104,10 @@ func (k *K8s) ApplyKustomize(path string) error {
 func (k *K8s) CreateNamespace(namespace string) error {
 	ns := &unstructured.Unstructured{
 		Object: map[string]interface{}{
-			"apiVersion": "v1",
-			"kind":       "Namespace",
-			"metadata": map[string]interface{}{
-				"name": namespace,
+			APIVERSION: "v1",
+			KIND:       "Namespace",
+			METADATA: map[string]interface{}{
+				NAME: namespace,
 			},
 		},
 	}
@@ -103,10 +117,10 @@ func (k *K8s) CreateNamespace(namespace string) error {
 		Resource: "namespaces",
 	}
 	if k.dryRun {
-		k.log.Infow("Dry run: Creating resource", "kind", "Namespace", "name", namespace)
+		k.log.Infow("Dry run: Creating resource", KIND, "Namespace", NAME, namespace)
 		return nil
 	}
-	k.log.Infow("Creating resource", "kind", "Namespace", "name", namespace)
+	k.log.Infow("Creating resource", KIND, "Namespace", NAME, namespace)
 	_, err := k.client.Resource(gvr).Create(k.ctx, ns, metav1.CreateOptions{})
 	if err != nil && strings.Contains(err.Error(), "already exists") {
 		return nil
@@ -144,10 +158,10 @@ func (k *K8s) ApplyResource(res *resource.Resource) error {
 	}
 	kind := obj.GetKind()
 	if k.dryRun {
-		k.log.Infow("Dry run: Creating resource", "namespace", namespace, "kind", kind, "name", obj.GetName())
+		k.log.Infow("Dry run: Creating resource", NAMESPACE, namespace, KIND, kind, NAME, obj.GetName())
 		return nil
 	}
-	k.log.Infow("Creating resource", "namespace", namespace, "kind", kind, "name", obj.GetName())
+	k.log.Infow("Creating resource", NAMESPACE, namespace, KIND, kind, NAME, obj.GetName())
 	if kind == "Namespace" || kind == "CustomResourceDefinition" || kind == "ClusterRole" || kind == "ClusterRoleBinding" {
 		_, err := k.client.Resource(gvr).Create(k.ctx, obj, metav1.CreateOptions{})
 		// ignore error if already exists
@@ -163,7 +177,7 @@ func (k *K8s) ApplyResource(res *resource.Resource) error {
 	if err != nil && strings.Contains(err.Error(), "already exists") {
 		return nil
 	} else if err != nil {
-		k.log.Errorw("failed to create resource", "error", err, "namespace", namespace, "kind", kind)
+		k.log.Errorw("failed to create resource", "error", err, NAMESPACE, namespace, KIND, kind)
 		return errors.Wrap(err, "")
 	}
 
@@ -173,11 +187,11 @@ func (k *K8s) ApplyResource(res *resource.Resource) error {
 func (k *K8s) CreateArgoInit(path, user, password string) error {
 	repo := &unstructured.Unstructured{
 		Object: map[string]interface{}{
-			"apiVersion": "v1",
-			"kind":       "Secret",
-			"metadata": map[string]interface{}{
-				"name":      "infra-repo",
-				"namespace": "argocd",
+			APIVERSION: "v1",
+			KIND:       "Secret",
+			METADATA: map[string]interface{}{
+				NAME:      "infra-repo",
+				NAMESPACE: ARGOCD,
 				"annotations": map[string]interface{}{
 					"managed-by": "argocd.argoproj.io",
 				},
@@ -188,10 +202,10 @@ func (k *K8s) CreateArgoInit(path, user, password string) error {
 			"type": "Opaque",
 			"data": map[string]interface{}{
 				"insecure": base64.StdEncoding.EncodeToString([]byte("true")),
-				"name":     base64.StdEncoding.EncodeToString([]byte("infra")),
+				NAME:       base64.StdEncoding.EncodeToString([]byte("infra")),
 				"username": base64.StdEncoding.EncodeToString([]byte(user)),
 				"password": base64.StdEncoding.EncodeToString([]byte(password)),
-				"project":  base64.StdEncoding.EncodeToString([]byte("default")),
+				"project":  base64.StdEncoding.EncodeToString([]byte(DEFAULT)),
 				"type":     base64.StdEncoding.EncodeToString([]byte("git")),
 				"url":      base64.StdEncoding.EncodeToString([]byte("https://gitea.default.svc/infra/infra")), // this is the internal url
 			},
@@ -204,10 +218,10 @@ func (k *K8s) CreateArgoInit(path, user, password string) error {
 		Resource: "secrets",
 	}
 	if k.dryRun {
-		k.log.Infow("Dry run: Creating resource", "namespace", "argocd", "kind", "Secret", "name", "infra-repo")
+		k.log.Infow("Dry run: Creating resource", NAMESPACE, ARGOCD, KIND, "Secret", NAME, "infra-repo")
 	} else {
-		k.log.Infow("Creating resource", "namespace", "argocd", "kind", "Secret", "name", "infra-repo")
-		_, err := k.client.Resource(gvr).Namespace("argocd").Create(k.ctx, repo, metav1.CreateOptions{})
+		k.log.Infow("Creating resource", NAMESPACE, ARGOCD, KIND, "Secret", NAME, "infra-repo")
+		_, err := k.client.Resource(gvr).Namespace(ARGOCD).Create(k.ctx, repo, metav1.CreateOptions{})
 		if err != nil && strings.Contains(err.Error(), "already exists") {
 			k.log.Infow("Repo already exists, ignoring")
 		} else if err != nil {
@@ -218,27 +232,27 @@ func (k *K8s) CreateArgoInit(path, user, password string) error {
 
 	argo := &unstructured.Unstructured{
 		Object: map[string]interface{}{
-			"apiVersion": "argoproj.io/v1alpha1",
-			"kind":       "Application",
-			"metadata": map[string]interface{}{
-				"name":      "init",
-				"namespace": "argocd",
+			APIVERSION: "argoproj.io/v1alpha1",
+			KIND:       "Application",
+			METADATA: map[string]interface{}{
+				NAME:      INIT,
+				NAMESPACE: ARGOCD,
 				"labels": map[string]interface{}{
 					"app.kubernetes.io/managed-by": "argocd.argoproj.io",
-					"app.kubernetes.io/instance":   "init",
+					"app.kubernetes.io/instance":   INIT,
 				},
 				"annotations": map[string]interface{}{
 					"argocd.argoproj.io/manifest-generate-paths": ".", // this is the path to the kustomization.yaml
 				},
 			},
-			"spec": map[string]interface{}{
+			SPEC: map[string]interface{}{
 				"destination": map[string]interface{}{
-					"namespace": "argocd",
-					"server":    "https://kubernetes.default.svc",
+					NAMESPACE: ARGOCD,
+					"server":  "https://kubernetes.default.svc",
 				},
-				"project": "default",
+				"project": DEFAULT,
 				"source": map[string]interface{}{
-					"path":           "init",
+					PATH:             INIT,
 					"repoURL":        "https://gitea.default.svc/infra/infra",
 					"targetRevision": "HEAD",
 				},
@@ -248,18 +262,18 @@ func (k *K8s) CreateArgoInit(path, user, password string) error {
 			},
 		},
 	}
-	k.list["argocd"] = []*unstructured.Unstructured{}
-	k.list["argocd"] = append(k.list["argocd"], argo)
+	k.list[ARGOCD] = []*unstructured.Unstructured{}
+	k.list[ARGOCD] = append(k.list[ARGOCD], argo)
 	gvr = schema.GroupVersionResource{
 		Group:    "argoproj.io",
 		Version:  "v1alpha1",
 		Resource: "applications",
 	}
 	if k.dryRun {
-		k.log.Infow("Dry run: Creating resource", "namespace", "argocd", "kind", "Application", "name", "init")
+		k.log.Infow("Dry run: Creating resource", NAMESPACE, ARGOCD, KIND, "Application", NAME, INIT)
 	} else {
-		k.log.Infow("Creating resource", "namespace", "argocd", "kind", "Application", "name", "init")
-		_, err := k.client.Resource(gvr).Namespace("argocd").Create(k.ctx, argo, metav1.CreateOptions{})
+		k.log.Infow("Creating resource", NAMESPACE, ARGOCD, KIND, "Application", NAME, INIT)
+		_, err := k.client.Resource(gvr).Namespace(ARGOCD).Create(k.ctx, argo, metav1.CreateOptions{})
 		if err != nil && strings.Contains(err.Error(), "already exists") {
 			k.log.Infow("Argo already exists, ignoring")
 		} else if err != nil {
@@ -270,13 +284,13 @@ func (k *K8s) CreateArgoInit(path, user, password string) error {
 
 	apps := &unstructured.Unstructured{
 		Object: map[string]interface{}{
-			"apiVersion": "argoproj.io/v1alpha1",
-			"kind":       "ApplicationSet",
-			"metadata": map[string]interface{}{
-				"name":      "init",
-				"namespace": "argocd",
+			APIVERSION: "argoproj.io/v1alpha1",
+			KIND:       "ApplicationSet",
+			METADATA: map[string]interface{}{
+				NAME:      INIT,
+				NAMESPACE: ARGOCD,
 			},
-			"spec": map[string]interface{}{
+			SPEC: map[string]interface{}{
 				"goTemplate":        true,
 				"goTemplateOptions": []string{"missingkey=error"},
 				"generators": []map[string]interface{}{
@@ -284,33 +298,33 @@ func (k *K8s) CreateArgoInit(path, user, password string) error {
 						"list": map[string]interface{}{
 							"elements": []map[string]interface{}{
 								{
-									"path": "init",
+									PATH: INIT,
 								},
 								{
-									"path": "gitea",
+									PATH: GITEA,
 								},
 								{
-									"path": "argocd",
+									PATH: ARGOCD,
 								},
 								{
-									"path": "cert-manager",
+									PATH: "cert-manager",
 								},
 								{
-									"path": "postgres-operator",
+									PATH: "postgres-operator",
 								},
 								{
-									"path": "valkey-operator",
+									PATH: "valkey-operator",
 								},
 								{
-									"path": "gitea-operator",
+									PATH: "gitea-operator",
 								},
 							},
 						},
 					},
 				},
 				"template": map[string]interface{}{
-					"metadata": map[string]interface{}{
-						"name": "{{.path}}",
+					METADATA: map[string]interface{}{
+						NAME: "{{.path}}",
 						"labels": map[string]interface{}{
 							"app.kubernetes.io/managed-by": "argocd.argoproj.io",
 							"app.kubernetes.io/instance":   "{{.path}}",
@@ -319,14 +333,14 @@ func (k *K8s) CreateArgoInit(path, user, password string) error {
 							"argocd.argoproj.io/manifest-generate-paths": ".", // this is the path to the kustomization.yaml
 						},
 					},
-					"spec": map[string]interface{}{
+					SPEC: map[string]interface{}{
 						"destination": map[string]interface{}{
-							"namespace": "argocd",
-							"server":    "https://kubernetes.default.svc",
+							NAMESPACE: ARGOCD,
+							"server":  "https://kubernetes.default.svc",
 						},
-						"project": "default",
+						"project": DEFAULT,
 						"source": map[string]interface{}{
-							"path":           "{{.path}}",
+							PATH:             "{{.path}}",
 							"repoURL":        "https://gitea.default.svc/infra/infra",
 							"targetRevision": "HEAD",
 						},
@@ -338,7 +352,7 @@ func (k *K8s) CreateArgoInit(path, user, password string) error {
 			},
 		},
 	}
-	k.list["argocd"] = append(k.list["argocd"], apps)
+	k.list[ARGOCD] = append(k.list[ARGOCD], apps)
 	return nil
 }
 
@@ -347,7 +361,7 @@ func (k *K8s) GetPivotPassword() (string, error) {
 		Group:    "",
 		Version:  "v1",
 		Resource: "secrets",
-	}).Namespace("default").Get(k.ctx, "pivot-password", metav1.GetOptions{})
+	}).Namespace(DEFAULT).Get(k.ctx, "pivot-password", metav1.GetOptions{})
 	if err != nil {
 		k.log.Errorw("failed to get secret", "error", err)
 		return "", errors.Wrap(err, "")
@@ -368,13 +382,13 @@ func (k *K8s) GetPivotPassword() (string, error) {
 func (k *K8s) CreateGitea(path, user, password, domain string, valkey bool) error {
 	gitea := &unstructured.Unstructured{
 		Object: map[string]interface{}{
-			"apiVersion": "hyperspike.io/v1",
-			"kind":       "Gitea",
-			"metadata": map[string]interface{}{
-				"name":      "gitea",
-				"namespace": "default",
+			APIVERSION: "hyperspike.io/v1",
+			KIND:       "Gitea",
+			METADATA: map[string]interface{}{
+				NAME:      GITEA,
+				NAMESPACE: DEFAULT,
 			},
-			"spec": map[string]interface{}{
+			SPEC: map[string]interface{}{
 				"tls":        true,
 				"valkey":     valkey,
 				"certIssuer": "selfsigned",
@@ -384,18 +398,18 @@ func (k *K8s) CreateGitea(path, user, password, domain string, valkey bool) erro
 			},
 		},
 	}
-	k.list["gitea"] = []*unstructured.Unstructured{}
-	k.list["gitea"] = append(k.list["gitea"], gitea)
+	k.list[GITEA] = []*unstructured.Unstructured{}
+	k.list[GITEA] = append(k.list[GITEA], gitea)
 	gvr := schema.GroupVersionResource{
 		Group:    "hyperspike.io",
 		Version:  "v1",
-		Resource: "gitea",
+		Resource: GITEA,
 	}
 	if k.dryRun {
-		k.log.Infow("Dry run: Creating resource", "namespace", "default", "kind", "Gitea", "name", "gitea")
+		k.log.Infow("Dry run: Creating resource", NAMESPACE, DEFAULT, KIND, "Gitea", NAME, GITEA)
 	} else {
-		k.log.Infow("Creating resource", "namespace", "default", "kind", "Gitea", "name", "gitea")
-		_, err := k.client.Resource(gvr).Namespace("default").Create(k.ctx, gitea, metav1.CreateOptions{})
+		k.log.Infow("Creating resource", NAMESPACE, DEFAULT, KIND, "Gitea", NAME, GITEA)
+		_, err := k.client.Resource(gvr).Namespace(DEFAULT).Create(k.ctx, gitea, metav1.CreateOptions{})
 		if err != nil && strings.Contains(err.Error(), "already exists") {
 			k.log.Infow("Gitea already exists, ignoring")
 		} else if err != nil {
@@ -408,11 +422,11 @@ func (k *K8s) CreateGitea(path, user, password, domain string, valkey bool) erro
 
 	passwordSecret := &unstructured.Unstructured{
 		Object: map[string]interface{}{
-			"apiVersion": "v1",
-			"kind":       "Secret",
-			"metadata": map[string]interface{}{
-				"name":      user + "-password",
-				"namespace": "default",
+			APIVERSION: "v1",
+			KIND:       "Secret",
+			METADATA: map[string]interface{}{
+				NAME:      user + "-password",
+				NAMESPACE: DEFAULT,
 			},
 			"type": "Opaque",
 			"data": map[string]interface{}{
@@ -426,10 +440,10 @@ func (k *K8s) CreateGitea(path, user, password, domain string, valkey bool) erro
 		Resource: "secrets",
 	}
 	if k.dryRun {
-		k.log.Infow("Dry run: Creating resource", "namespace", "default", "kind", "Secret", "name", user+"-password")
+		k.log.Infow("Dry run: Creating resource", NAMESPACE, DEFAULT, KIND, "Secret", NAME, user+"-password")
 	} else {
-		k.log.Infow("Creating resource", "namespace", "default", "kind", "Secret", "name", user+"-password")
-		_, err := k.client.Resource(gvr).Namespace("default").Create(k.ctx, passwordSecret, metav1.CreateOptions{})
+		k.log.Infow("Creating resource", NAMESPACE, DEFAULT, KIND, "Secret", NAME, user+"-password")
+		_, err := k.client.Resource(gvr).Namespace(DEFAULT).Create(k.ctx, passwordSecret, metav1.CreateOptions{})
 		if err != nil && strings.Contains(err.Error(), "already exists") {
 			k.log.Infow("Password already exists, ignoring")
 		} else if err != nil {
@@ -440,35 +454,35 @@ func (k *K8s) CreateGitea(path, user, password, domain string, valkey bool) erro
 
 	giteaUser := &unstructured.Unstructured{
 		Object: map[string]interface{}{
-			"apiVersion": "hyperspike.io/v1",
-			"kind":       "User",
-			"metadata": map[string]interface{}{
-				"name":      user,
-				"namespace": "default",
+			APIVERSION: "hyperspike.io/v1",
+			KIND:       "User",
+			METADATA: map[string]interface{}{
+				NAME:      user,
+				NAMESPACE: DEFAULT,
 			},
-			"spec": map[string]interface{}{
+			SPEC: map[string]interface{}{
 				"email": fmt.Sprintf("%s@%s", user, domain),
 				"password": map[string]interface{}{
-					"name": user + "-password",
-					"key":  "password",
+					NAME:  user + "-password",
+					"key": "password",
 				},
 				"instance": map[string]interface{}{
-					"name": "gitea",
+					NAME: GITEA,
 				},
 			},
 		},
 	}
-	k.list["gitea"] = append(k.list["gitea"], giteaUser)
+	k.list[GITEA] = append(k.list[GITEA], giteaUser)
 	gvr = schema.GroupVersionResource{
 		Group:    "hyperspike.io",
 		Version:  "v1",
 		Resource: "users",
 	}
 	if k.dryRun {
-		k.log.Infow("Dry run: Creating resource", "namespace", "default", "kind", "User", "name", user)
+		k.log.Infow("Dry run: Creating resource", NAMESPACE, DEFAULT, KIND, "User", NAME, user)
 	} else {
-		k.log.Infow("Creating resource", "namespace", "default", "kind", "User", "name", user)
-		_, err := k.client.Resource(gvr).Namespace("default").Create(k.ctx, giteaUser, metav1.CreateOptions{})
+		k.log.Infow("Creating resource", NAMESPACE, DEFAULT, KIND, "User", NAME, user)
+		_, err := k.client.Resource(gvr).Namespace(DEFAULT).Create(k.ctx, giteaUser, metav1.CreateOptions{})
 		if err != nil && strings.Contains(err.Error(), "already exists") {
 			k.log.Infow("User already exists, ignoring")
 		} else if err != nil {
@@ -479,20 +493,20 @@ func (k *K8s) CreateGitea(path, user, password, domain string, valkey bool) erro
 
 	org := &unstructured.Unstructured{
 		Object: map[string]interface{}{
-			"apiVersion": "hyperspike.io/v1",
-			"kind":       "Org",
-			"metadata": map[string]interface{}{
-				"name":      "infra",
-				"namespace": "default",
+			APIVERSION: "hyperspike.io/v1",
+			KIND:       "Org",
+			METADATA: map[string]interface{}{
+				NAME:      "infra",
+				NAMESPACE: DEFAULT,
 			},
-			"spec": map[string]interface{}{
+			SPEC: map[string]interface{}{
 				"description": "Infrastructure team",
 				"instance": map[string]interface{}{
-					"name": "gitea",
+					NAME: GITEA,
 				},
 				"teams": []map[string]interface{}{
 					{
-						"name":            "admin",
+						NAME:              "admin",
 						"permission":      "admin",
 						"includeAllRepos": true,
 						"createOrgRepo":   true,
@@ -502,17 +516,17 @@ func (k *K8s) CreateGitea(path, user, password, domain string, valkey bool) erro
 			},
 		},
 	}
-	k.list["gitea"] = append(k.list["gitea"], org)
+	k.list[GITEA] = append(k.list[GITEA], org)
 	gvr = schema.GroupVersionResource{
 		Group:    "hyperspike.io",
 		Version:  "v1",
 		Resource: "orgs",
 	}
 	if k.dryRun {
-		k.log.Infow("Dry run: Creating resource", "namespace", "default", "kind", "Org", "name", "infra")
+		k.log.Infow("Dry run: Creating resource", NAMESPACE, DEFAULT, KIND, "Org", NAME, "infra")
 	} else {
-		k.log.Infow("Creating resource", "namespace", "default", "kind", "Org", "name", "infra")
-		_, err := k.client.Resource(gvr).Namespace("default").Create(k.ctx, org, metav1.CreateOptions{})
+		k.log.Infow("Creating resource", NAMESPACE, DEFAULT, KIND, "Org", NAME, "infra")
+		_, err := k.client.Resource(gvr).Namespace(DEFAULT).Create(k.ctx, org, metav1.CreateOptions{})
 		if err != nil && strings.Contains(err.Error(), "already exists") {
 			k.log.Infow("Org already exists, ignoring")
 		} else if err != nil {
@@ -523,31 +537,31 @@ func (k *K8s) CreateGitea(path, user, password, domain string, valkey bool) erro
 
 	repo := &unstructured.Unstructured{
 		Object: map[string]interface{}{
-			"apiVersion": "hyperspike.io/v1",
-			"kind":       "Repo",
-			"metadata": map[string]interface{}{
-				"name":      "infra",
-				"namespace": "default",
+			APIVERSION: "hyperspike.io/v1",
+			KIND:       "Repo",
+			METADATA: map[string]interface{}{
+				NAME:      "infra",
+				NAMESPACE: DEFAULT,
 			},
-			"spec": map[string]interface{}{
+			SPEC: map[string]interface{}{
 				"org": map[string]interface{}{
-					"name": "infra",
+					NAME: "infra",
 				},
 				"private": true,
 			},
 		},
 	}
-	k.list["gitea"] = append(k.list["gitea"], repo)
+	k.list[GITEA] = append(k.list[GITEA], repo)
 	gvr = schema.GroupVersionResource{
 		Group:    "hyperspike.io",
 		Version:  "v1",
 		Resource: "repoes",
 	}
 	if k.dryRun {
-		k.log.Infow("Dry run: Creating resource", "namespace", "default", "kind", "Repo", "name", "infra")
+		k.log.Infow("Dry run: Creating resource", NAMESPACE, DEFAULT, KIND, "Repo", NAME, "infra")
 	} else {
-		k.log.Infow("Creating resource", "namespace", "default", "kind", "Repo", "name", "infra")
-		_, err := k.client.Resource(gvr).Namespace("default").Create(k.ctx, repo, metav1.CreateOptions{})
+		k.log.Infow("Creating resource", NAMESPACE, DEFAULT, KIND, "Repo", NAME, "infra")
+		_, err := k.client.Resource(gvr).Namespace(DEFAULT).Create(k.ctx, repo, metav1.CreateOptions{})
 		if err != nil && strings.Contains(err.Error(), "already exists") {
 			k.log.Infow("Repo already exists, ignoring")
 		} else if err != nil {
@@ -559,18 +573,18 @@ func (k *K8s) CreateGitea(path, user, password, domain string, valkey bool) erro
 }
 
 func (k *K8s) WriteGiteaToFile(path string) error {
-	if len(k.list["gitea"]) == 0 {
+	if len(k.list[GITEA]) == 0 {
 		k.log.Error("no objects to write, you may need to run CreateGitea first")
 		return errors.New("no objects to write, you may need to run CreateGitea first")
 	}
-	return k.writeToFile("gitea", path)
+	return k.writeToFile(GITEA, path)
 }
 func (k *K8s) WriteArgoToFile(path string) error {
-	if len(k.list["argocd"]) == 0 {
+	if len(k.list[ARGOCD]) == 0 {
 		k.log.Error("no objects to write, you may need to run CreateArgoInit first")
 		return errors.New("no objects to write, you may need to run CreateArgoInit first")
 	}
-	return k.writeToFile("argocd", path)
+	return k.writeToFile(ARGOCD, path)
 }
 
 func (k *K8s) writeToFile(list, path string) error {
